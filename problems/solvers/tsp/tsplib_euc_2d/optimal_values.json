@@ -1,0 +1,318 @@
+{
+  "source": "https://comopt.ifi.uni-heidelberg.de/software/TSPLIB95/tsp/TSP-BEST.html",
+  "edge_weight_type": "EUC_2D",
+  "instances": {
+    "a280": {
+      "dimension": 280,
+      "optimal_length": 2579
+    },
+    "berlin52": {
+      "dimension": 52,
+      "optimal_length": 7542
+    },
+    "bier127": {
+      "dimension": 127,
+      "optimal_length": 118282
+    },
+    "brd14051": {
+      "dimension": 14051,
+      "optimal_length": 469385
+    },
+    "ch130": {
+      "dimension": 130,
+      "optimal_length": 6110
+    },
+    "ch150": {
+      "dimension": 150,
+      "optimal_length": 6528
+    },
+    "d1291": {
+      "dimension": 1291,
+      "optimal_length": 50801
+    },
+    "d15112": {
+      "dimension": 15112,
+      "optimal_length": 1573084
+    },
+    "d1655": {
+      "dimension": 1655,
+      "optimal_length": 62128
+    },
+    "d18512": {
+      "dimension": 18512,
+      "optimal_length": 645238
+    },
+    "d198": {
+      "dimension": 198,
+      "optimal_length": 15780
+    },
+    "d2103": {
+      "dimension": 2103,
+      "optimal_length": 80450
+    },
+    "d493": {
+      "dimension": 493,
+      "optimal_length": 35002
+    },
+    "d657": {
+      "dimension": 657,
+      "optimal_length": 48912
+    },
+    "eil101": {
+      "dimension": 101,
+      "optimal_length": 629
+    },
+    "eil51": {
+      "dimension": 51,
+      "optimal_length": 426
+    },
+    "eil76": {
+      "dimension": 76,
+      "optimal_length": 538
+    },
+    "fl1400": {
+      "dimension": 1400,
+      "optimal_length": 20127
+    },
+    "fl1577": {
+      "dimension": 1577,
+      "optimal_length": 22249
+    },
+    "fl3795": {
+      "dimension": 3795,
+      "optimal_length": 28772
+    },
+    "fl417": {
+      "dimension": 417,
+      "optimal_length": 11861
+    },
+    "fnl4461": {
+      "dimension": 4461,
+      "optimal_length": 182566
+    },
+    "gil262": {
+      "dimension": 262,
+      "optimal_length": 2378
+    },
+    "kroA100": {
+      "dimension": 100,
+      "optimal_length": 21282
+    },
+    "kroA150": {
+      "dimension": 150,
+      "optimal_length": 26524
+    },
+    "kroA200": {
+      "dimension": 200,
+      "optimal_length": 29368
+    },
+    "kroB100": {
+      "dimension": 100,
+      "optimal_length": 22141
+    },
+    "kroB150": {
+      "dimension": 150,
+      "optimal_length": 26130
+    },
+    "kroB200": {
+      "dimension": 200,
+      "optimal_length": 29437
+    },
+    "kroC100": {
+      "dimension": 100,
+      "optimal_length": 20749
+    },
+    "kroD100": {
+      "dimension": 100,
+      "optimal_length": 21294
+    },
+    "kroE100": {
+      "dimension": 100,
+      "optimal_length": 22068
+    },
+    "lin105": {
+      "dimension": 105,
+      "optimal_length": 14379
+    },
+    "lin318": {
+      "dimension": 318,
+      "optimal_length": 42029
+    },
+    "linhp318": {
+      "dimension": 318,
+      "optimal_length": 41345
+    },
+    "nrw1379": {
+      "dimension": 1379,
+      "optimal_length": 56638
+    },
+    "p654": {
+      "dimension": 654,
+      "optimal_length": 34643
+    },
+    "pcb1173": {
+      "dimension": 1173,
+      "optimal_length": 56892
+    },
+    "pcb3038": {
+      "dimension": 3038,
+      "optimal_length": 137694
+    },
+    "pcb442": {
+      "dimension": 442,
+      "optimal_length": 50778
+    },
+    "pr1002": {
+      "dimension": 1002,
+      "optimal_length": 259045
+    },
+    "pr107": {
+      "dimension": 107,
+      "optimal_length": 44303
+    },
+    "pr124": {
+      "dimension": 124,
+      "optimal_length": 59030
+    },
+    "pr136": {
+      "dimension": 136,
+      "optimal_length": 96772
+    },
+    "pr144": {
+      "dimension": 144,
+      "optimal_length": 58537
+    },
+    "pr152": {
+      "dimension": 152,
+      "optimal_length": 73682
+    },
+    "pr226": {
+      "dimension": 226,
+      "optimal_length": 80369
+    },
+    "pr2392": {
+      "dimension": 2392,
+      "optimal_length": 378032
+    },
+    "pr264": {
+      "dimension": 264,
+      "optimal_length": 49135
+    },
+    "pr299": {
+      "dimension": 299,
+      "optimal_length": 48191
+    },
+    "pr439": {
+      "dimension": 439,
+      "optimal_length": 107217
+    },
+    "pr76": {
+      "dimension": 76,
+      "optimal_length": 108159
+    },
+    "rat195": {
+      "dimension": 195,
+      "optimal_length": 2323
+    },
+    "rat575": {
+      "dimension": 575,
+      "optimal_length": 6773
+    },
+    "rat783": {
+      "dimension": 783,
+      "optimal_length": 8806
+    },
+    "rat99": {
+      "dimension": 99,
+      "optimal_length": 1211
+    },
+    "rd100": {
+      "dimension": 100,
+      "optimal_length": 7910
+    },
+    "rd400": {
+      "dimension": 400,
+      "optimal_length": 15281
+    },
+    "rl11849": {
+      "dimension": 11849,
+      "optimal_length": 923288
+    },
+    "rl1304": {
+      "dimension": 1304,
+      "optimal_length": 252948
+    },
+    "rl1323": {
+      "dimension": 1323,
+      "optimal_length": 270199
+    },
+    "rl1889": {
+      "dimension": 1889,
+      "optimal_length": 316536
+    },
+    "rl5915": {
+      "dimension": 5915,
+      "optimal_length": 565530
+    },
+    "rl5934": {
+      "dimension": 5934,
+      "optimal_length": 556045
+    },
+    "st70": {
+      "dimension": 70,
+      "optimal_length": 675
+    },
+    "ts225": {
+      "dimension": 225,
+      "optimal_length": 126643
+    },
+    "tsp225": {
+      "dimension": 225,
+      "optimal_length": 3916
+    },
+    "u1060": {
+      "dimension": 1060,
+      "optimal_length": 224094
+    },
+    "u1432": {
+      "dimension": 1432,
+      "optimal_length": 152970
+    },
+    "u159": {
+      "dimension": 159,
+      "optimal_length": 42080
+    },
+    "u1817": {
+      "dimension": 1817,
+      "optimal_length": 57201
+    },
+    "u2152": {
+      "dimension": 2152,
+      "optimal_length": 64253
+    },
+    "u2319": {
+      "dimension": 2319,
+      "optimal_length": 234256
+    },
+    "u574": {
+      "dimension": 574,
+      "optimal_length": 36905
+    },
+    "u724": {
+      "dimension": 724,
+      "optimal_length": 41910
+    },
+    "usa13509": {
+      "dimension": 13509,
+      "optimal_length": 19982859
+    },
+    "vm1084": {
+      "dimension": 1084,
+      "optimal_length": 239297
+    },
+    "vm1748": {
+      "dimension": 1748,
+      "optimal_length": 336556
+    }
+  }
+}

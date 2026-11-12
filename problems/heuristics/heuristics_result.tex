@@ -1,0 +1,89 @@
+\documentclass{article}
+\usepackage[a4paper,margin=1.5cm]{geometry}
+\usepackage{booktabs}
+\usepackage{caption}
+\usepackage{newtxtext,newtxmath}
+
+% Underlined parameter settings are in-domain in the supplied figures.
+\newcommand{\indomain}[1]{\underline{\ensuremath{#1}}}
+
+% Arguments: problem name, non-LLM baseline 1, non-LLM baseline 2.
+\newcommand{\heuristicheader}[3]{%
+  \textbf{#1} & #2 & #3 & EoH & ReEvo & MCTS-AHD & Codex & \textbf{COPScientist}\\
+  \midrule
+}
+
+\begin{document}
+
+\begin{table*}[t]
+\centering
+\captionsetup{skip=4pt}
+\caption{Heuristic quality across problems and parameter settings.
+Results are reported as mean gaps (\%); lower is better.
+Underlined parameter settings are in-domain.}
+\label{tab:heuristic-quality}
+\small
+\setlength{\tabcolsep}{4pt}
+\renewcommand{\arraystretch}{1.08}
+
+\begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}lccccccc@{}}
+\toprule
+\textbf{Problems}
+  & \multicolumn{2}{c}{Non-LLM baselines}
+  & \multicolumn{5}{c@{}}{LLM-based AHD}\\
+\cmidrule(lr){2-3}\cmidrule(l){4-8}
+
+\heuristicheader{TSP-Constructive}{Greedy Construct}{POMO}
+\indomain{N=50} & xx & xx & xx & xx & xx & xx & xx\\
+$N=100$        & xx & xx & xx & xx & xx & xx & xx\\
+$N=200$        & xx & xx & xx & xx & xx & xx & xx\\
+\midrule
+
+\heuristicheader{TSP-ACO}{ACO}{DeepACO}
+\indomain{N=50} & xx & xx & xx & xx & xx & xx & xx\\
+$N=100$        & xx & xx & xx & xx & xx & xx & xx\\
+\midrule
+
+\heuristicheader{CVRP-ACO}{ACO}{DeepACO}
+\indomain{N=50,\ C=50} & xx & xx & xx & xx & xx & xx & xx\\
+$N=100,\ C=50$        & xx & xx & xx & xx & xx & xx & xx\\
+\midrule
+
+\heuristicheader{BPP-Online-Constructive}{Best Fit}{First Fit}
+\indomain{N=1{,}000,\ W=100} & xx & xx & xx & xx & xx & xx & xx\\
+\indomain{N=1{,}000,\ W=500} & xx & xx & xx & xx & xx & xx & xx\\
+\indomain{N=5{,}000,\ W=100} & xx & xx & xx & xx & xx & xx & xx\\
+\indomain{N=5{,}000,\ W=500} & xx & xx & xx & xx & xx & xx & xx\\
+$N=10{,}000,\ W=100$        & xx & xx & xx & xx & xx & xx & xx\\
+$N=10{,}000,\ W=500$        & xx & xx & xx & xx & xx & xx & xx\\
+\midrule
+
+\heuristicheader{KP-Constructive}{Greedy Construct}{POMO}
+\indomain{N=50,\ W=12.5} & xx & xx & xx & xx & xx & xx & xx\\
+\indomain{N=100,\ W=25}  & xx & xx & xx & xx & xx & xx & xx\\
+$N=200,\ W=25$          & xx & xx & xx & xx & xx & xx & xx\\
+\midrule
+
+\heuristicheader{BPP-Offline-ACO}{ACO}{DeepACO}
+\indomain{N=500,\ C=150} & xx & xx & xx & xx & xx & xx & xx\\
+$N=1{,}000,\ C=150$     & xx & xx & xx & xx & xx & xx & xx\\
+\midrule
+
+\heuristicheader{MKP-ACO}{ACO}{DeepACO}
+\indomain{N=100,\ m=5} & xx & xx & xx & xx & xx & xx & xx\\
+$N=200,\ m=5$         & xx & xx & xx & xx & xx & xx & xx\\
+\bottomrule
+\end{tabular*}
+
+\vspace{3pt}
+\begin{minipage}{\textwidth}
+\footnotesize
+\textit{Note.} Reference solutions for TSP-Constructive and
+KP-Constructive are obtained using LKH and OR-Tools, respectively.
+Online BPP gaps are measured relative to a lower bound.
+Within each task and parameter setting, all methods share the same reference.
+% Adjust the references and in-domain markings to match your experiments.
+\end{minipage}
+\end{table*}
+
+\end{document}

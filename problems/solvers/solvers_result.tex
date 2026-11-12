@@ -1,0 +1,89 @@
+\documentclass{article}
+\usepackage[a4paper,margin=1.5cm]{geometry}
+\usepackage{booktabs}
+\usepackage{caption}
+\usepackage{newtxtext,newtxmath}
+
+\begin{document}
+
+\begin{table*}[t]
+\centering
+\captionsetup{skip=4pt}
+\caption{Solver quality on public benchmarks.}
+\label{tab:solver-quality}
+\small
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.02}
+
+% Seven columns: two descriptors, three baselines, Codex, and COPScientist.
+% Results are placeholders; old values cannot be assigned to new methods.
+% Added baselines:
+% LKH-3: Helsgaun (2017), https://forskning.ruc.dk/en/publications/an-extension-of-the-lin-kernighan-helsgaun-tsp-solver-for-constra/
+% HGS-CVRP: Vidal (2022), https://github.com/vidalt/HGS-CVRP
+% CP-SAT: https://developers.google.com/optimization/scheduling/job_shop
+\begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}ll*{5}{c}@{}}
+\toprule
+\multicolumn{7}{@{}l}{\textbf{TSP --- TSPLIB EUC\_2D}
+  (mean gap \%; node scale)}\\
+Benchmark & Scale & ReEvo & DRAGON & LKH-3 & Codex & \textbf{COPScientist}\\
+\midrule
+TSPLIB & 50--500       & xx & xx & xx & xx & xx\\
+       & 501--1,000    & xx & xx & xx & xx & xx\\
+       & 1,001--2,000  & xx & xx & xx & xx & xx\\
+       & 2,001--5,000  & xx & xx & xx & xx & xx\\
+       & 5,001--20,000 & xx & xx & xx & xx & xx\\
+\multicolumn{2}{@{}l}{\textit{Average}}
+       & xx & xx & xx & xx & xx\\
+\midrule
+\multicolumn{7}{@{}l}{\textbf{CVRP --- CVRPLIB-X}
+  (mean gap \%; customer scale)}\\
+Benchmark & Scale & ReEvo & AFL & HGS-CVRP & Codex & \textbf{COPScientist}\\
+\midrule
+X & 100--200   & xx & xx & xx & xx & xx\\
+  & 201--500   & xx & xx & xx & xx & xx\\
+  & 501--1,000 & xx & xx & xx & xx & xx\\
+\multicolumn{2}{@{}l}{\textit{Average}}
+  & xx & xx & xx & xx & xx\\
+\midrule
+\multicolumn{7}{@{}l}{\textbf{JSSP --- Taillard and DMU}
+  (mean gap to best-known UB \%; jobs $\times$ machines)}\\
+Family & Shape & NDS-S & SLIM(GM512) & CP-SAT & Codex & \textbf{COPScientist}\\
+\midrule
+Taillard & $15\times15$  & xx & xx & xx & xx & xx\\
+         & $20\times15$  & xx & xx & xx & xx & xx\\
+         & $20\times20$  & xx & xx & xx & xx & xx\\
+         & $30\times15$  & xx & xx & xx & xx & xx\\
+         & $30\times20$  & xx & xx & xx & xx & xx\\
+         & $50\times15$  & xx & xx & xx & xx & xx\\
+         & $50\times20$  & xx & xx & xx & xx & xx\\
+         & $100\times20$ & xx & xx & xx & xx & xx\\
+DMU      & $20\times15$  & xx & xx & xx & xx & xx\\
+         & $20\times20$  & xx & xx & xx & xx & xx\\
+         & $30\times15$  & xx & xx & xx & xx & xx\\
+         & $30\times20$  & xx & xx & xx & xx & xx\\
+         & $40\times15$  & xx & xx & xx & xx & xx\\
+         & $40\times20$  & xx & xx & xx & xx & xx\\
+         & $50\times15$  & xx & xx & xx & xx & xx\\
+         & $50\times20$  & xx & xx & xx & xx & xx\\
+\multicolumn{2}{@{}l}{\textit{Average}}
+  & xx & xx & xx & xx & xx\\
+\midrule
+\multicolumn{7}{@{}l}{\textbf{3D-BPP --- MPV320}
+  (mean bins by class; mean total bins across runs in the summary row $\downarrow$)}\\
+Benchmark & Class & CG-NR & BRKGA-BPP & HGA-NR & Codex & \textbf{COPScientist}\\
+\midrule
+MPV & 1 & xx & xx & xx & xx & xx\\
+    & 2 & xx & xx & xx & xx & xx\\
+    & 3 & xx & xx & xx & xx & xx\\
+    & 4 & xx & xx & xx & xx & xx\\
+    & 5 & xx & xx & xx & xx & xx\\
+    & 6 & xx & xx & xx & xx & xx\\
+    & 7 & xx & xx & xx & xx & xx\\
+    & 8 & xx & xx & xx & xx & xx\\
+\multicolumn{2}{@{}l}{\textit{Mean total bins}}
+  & xx & xx & xx & xx & xx\\
+\bottomrule
+\end{tabular*}
+\end{table*}
+
+\end{document}
