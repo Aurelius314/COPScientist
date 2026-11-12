@@ -1,0 +1,29 @@
+# Global run configuration. Problem-specific settings live in problems/<kind>/<problem>/settings.yaml.
+problem: tsp_constructive
+
+run:
+  output_dir: null  # Defaults to runs/<problem>
+  rounds: 2
+  coordinate_agents: 1
+  ideas_per_round: 2
+  max_depth: 2
+  debug_attempts: 1
+  experiment_repeats: 1
+  timeout_seconds: 300
+
+search:
+  literature_queries:
+    - traveling salesman constructive heuristic
+    - vehicle routing insertion heuristic
+    - job shop scheduling dispatching rule
+  web_queries:
+    - TSP constructive heuristic implementation
+    - cross domain combinatorial optimization heuristics
+  results_per_query: 3
+  required: false
+  brave_key_env: BRAVE_SEARCH_API_KEY
+
+llm:
+  model: gpt-4.1-mini
+  base_url: https://api.openai.com/v1
+  api_key_env: OPENAI_API_KEY

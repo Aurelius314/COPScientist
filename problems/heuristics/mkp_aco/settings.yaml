@@ -1,0 +1,15 @@
+task:
+  name: mkp_aco
+  kind: heuristic
+  objective: max
+  entry_function: heuristics_v2
+  seed_file: gpt.py
+  train_args:
+  - '100'
+  - .
+  - train
+  validation_args:
+  - '100'
+  - .
+  - val
+  description: Design a multidimensional knapsack ant-colony item heuristic.

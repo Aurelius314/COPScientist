@@ -1,0 +1,15 @@
+task:
+  name: 3d-bpp
+  kind: solver
+  objective: min
+  entry_function: 3d-bpp
+  seed_file: seed_solver.py
+  instances:
+  - instances_320/CLASS_1/N50/instance_01.txt
+  - instances_320/CLASS_2/N50/instance_01.txt
+  validation_instances:
+  - instances_320/CLASS_3/N50/instance_01.txt
+  - instances_320/CLASS_4/N50/instance_01.txt
+  max_instances: 2
+  description: solve(instance) returns [bin_index,x,y,z] for every item in input order.
+    Fixed orientation, integer coordinates, no overlap.

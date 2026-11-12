@@ -1,0 +1,15 @@
+task:
+  name: bpp_offline_aco
+  kind: heuristic
+  objective: min
+  entry_function: heuristics_v2
+  seed_file: gpt.py
+  train_args:
+  - '500'
+  - .
+  - train
+  validation_args:
+  - '500'
+  - .
+  - val
+  description: Design an offline bin-packing ant-colony heuristic.

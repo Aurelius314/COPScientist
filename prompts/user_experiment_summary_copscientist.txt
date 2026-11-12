@@ -1,0 +1,3 @@
+Summarize this evaluated idea using its measured evidence and parent score. Return the requested JSON object.
+
+{{context}}

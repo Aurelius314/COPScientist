@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "copscientist"
+version = "0.1.0"
+description = "Research agents for combinatorial optimization heuristic and solver design"
+requires-python = ">=3.11"
+dependencies = ["PyYAML>=6.0"]
+
+[project.optional-dependencies]
+heuristics = ["numpy>=1.26", "scipy>=1.11"]
+mkp = ["numpy>=1.26", "scipy>=1.11", "torch>=2.0"]
+
+[project.scripts]
+copscientist = "copscientist.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

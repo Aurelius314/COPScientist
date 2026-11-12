@@ -1,0 +1,16 @@
+task:
+  name: cvrp
+  kind: solver
+  objective: min
+  entry_function: cvrp
+  seed_file: seed_solver.py
+  instances:
+  - X/X-n101-k25.vrp
+  - X/X-n106-k14.vrp
+  - X/X-n110-k13.vrp
+  validation_instances:
+  - X/X-n115-k10.vrp
+  - X/X-n120-k6.vrp
+  max_instances: 3
+  description: solve(instance) returns routes of original customer IDs, excluding
+    depot 1. Each route must obey capacity.

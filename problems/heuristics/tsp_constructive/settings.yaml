@@ -1,0 +1,15 @@
+task:
+  name: tsp_constructive
+  kind: heuristic
+  objective: min
+  entry_function: select_next_node
+  seed_file: gpt.py
+  train_args:
+  - '50'
+  - .
+  - train
+  validation_args:
+  - '50'
+  - .
+  - val
+  description: Design a TSP constructive next-node heuristic.

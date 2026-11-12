@@ -1,0 +1,16 @@
+task:
+  name: bpp_online
+  kind: heuristic
+  objective: min
+  entry_function: priority
+  seed_file: gpt.py
+  aggregate: last
+  train_args:
+  - '100'
+  - .
+  - train
+  validation_args:
+  - '100'
+  - .
+  - val
+  description: Design an online bin-packing bin priority function.

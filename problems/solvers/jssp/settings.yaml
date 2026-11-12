@@ -1,0 +1,16 @@
+task:
+  name: jssp
+  kind: solver
+  objective: min
+  entry_function: jssp
+  seed_file: seed_solver.py
+  instances:
+  - Taillard/ta01js.json
+  - DMU/dmu01.json
+  validation_instances:
+  - Taillard/ta02js.json
+  - DMU/dmu02.json
+  max_instances: 2
+  description: solve(instance) returns a job-ID sequence with each job repeated once
+    per operation. Evaluator builds an earliest-start feasible schedule and minimizes
+    makespan.

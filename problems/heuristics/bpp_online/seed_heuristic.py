@@ -1,0 +1,12 @@
+"""Seed priority heuristic for online bin packing."""
+
+import numpy as np
+
+
+def priority(item: float, bins_remain_cap: np.ndarray) -> np.ndarray:
+    max_bin_cap = max(bins_remain_cap)
+    score = (bins_remain_cap - max_bin_cap) ** 2 / item + bins_remain_cap ** 2 / (item ** 2)
+    score += bins_remain_cap ** 2 / item ** 3
+    score[bins_remain_cap > item] = -score[bins_remain_cap > item]
+    score[1:] -= score[:-1]
+    return score
