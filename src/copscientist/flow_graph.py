@@ -2,22 +2,22 @@
 
 from __future__ import annotations
 
-from .utils import Candidate, better
+from .utils import Solution, better
 
 
 class FlowGraph:
-    def __init__(self, objective: str, root: Candidate | None = None):
+    def __init__(self, objective: str, root: Solution | None = None):
         self.objective = objective
-        self.nodes: dict[str, Candidate] = {}
+        self.nodes: dict[str, Solution] = {}
         self.children: dict[str, list[str]] = {}
         self.depths: dict[str, int] = {}
         self.done: set[str] = set()
         if root is not None:
             self.add(root, depth=0)
 
-    def add(self, candidate: Candidate, *, depth: int | None = None) -> None:
+    def add(self, candidate: Solution, *, depth: int | None = None) -> None:
         if candidate.id in self.nodes:
-            raise ValueError(f"Duplicate candidate: {candidate.id}")
+            raise ValueError(f"Duplicate solution: {candidate.id}")
         if depth is None and candidate.parent_id and candidate.parent_id not in self.nodes:
             raise ValueError(f"Missing parent: {candidate.parent_id}")
         self.nodes[candidate.id] = candidate
@@ -29,7 +29,7 @@ class FlowGraph:
     def mark_done(self, candidate_id: str) -> None:
         self.done.add(candidate_id)
 
-    def select(self, max_depth: int | None, rank: int = 0) -> Candidate | None:
+    def select(self, max_depth: int | None, rank: int = 0) -> Solution | None:
         frontier = [candidate for candidate in self.nodes.values()
                     if candidate.id not in self.done and not self.children[candidate.id]
                     and (max_depth is None or self.depths[candidate.id] < max_depth)
@@ -38,7 +38,7 @@ class FlowGraph:
                       reverse=self.objective == "max")
         return frontier[rank % len(frontier)] if frontier else None
 
-    def leaves(self) -> list[Candidate]:
+    def leaves(self) -> list[Solution]:
         return [candidate for candidate in self.nodes.values()
                 if not self.children[candidate.id]]
 
@@ -54,7 +54,7 @@ class FlowGraph:
             for candidate in self.nodes.values()
         ]}
 
-    def best(self) -> Candidate | None:
+    def best(self) -> Solution | None:
         best = None
         for candidate in self.nodes.values():
             if candidate.evaluation.status == "ok" and (

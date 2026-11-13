@@ -134,7 +134,8 @@ class Evaluator:
                 results.append(_parse_heuristic_result(result.stdout))
             except (ValueError, SyntaxError) as exc:
                 output = "\n".join(outputs + [result.stdout, result.stderr])
-                return Evaluation(status="failed", feedback=str(exc),
+                detail = (result.stderr or result.stdout)[-2500:]
+                return Evaluation(status="failed", feedback=f"{exc}: {detail}"[-3000:],
                                   output_path=self._save_output(code_path, output))
             outputs.append(result.stdout)
         keys = list(results[0][0])
@@ -366,6 +367,19 @@ def _run_heuristic(candidate_dir: str, problem_dir: str,
     problem = Path(problem_dir).resolve()
     sys.path.insert(0, str(candidate))
     sys.path.insert(1, str(problem))
+    # OR-Agent-style evaluators import seed_heuristic, while the current
+    # candidate is stored as gpt.py. Bind that import to the candidate file.
+    candidate_file = candidate / "gpt.py"
+    evaluator_source = (problem / "eval.py").read_text(encoding="utf-8")
+    if candidate_file.is_file() and re.search(
+            r"^\s*(?:from\s+seed_heuristic\s+import|import\s+seed_heuristic\b)",
+            evaluator_source, re.M):
+        spec = importlib.util.spec_from_file_location("seed_heuristic", candidate_file)
+        if spec is None or spec.loader is None:
+            raise ValueError("Cannot import heuristic candidate")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["seed_heuristic"] = module
+        spec.loader.exec_module(module)
     sys.argv = [str(problem / "eval.py"), *args]
     globals_for_eval = ({"Callbacks": runpy.run_path(callback_path)["Callbacks"]}
                         if callback_path != "-" else {})

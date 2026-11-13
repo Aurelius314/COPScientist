@@ -11,7 +11,7 @@ from .evolution_agent import EvolutionAgent
 from .experiment_agent import ExperimentAgent
 from .flow_graph import FlowGraph
 from .ideation_agent import IdeationAgent
-from .utils import Candidate, Model, better, experiment_allocation, load_prompt, parse_json, render_prompt
+from .utils import Solution, Model, better, experiment_allocation, load_prompt, parse_json, render_prompt
 
 
 class CoordinateAgent:
@@ -39,7 +39,7 @@ class CoordinateAgent:
         self.long_term_reflection = state.get("long_term_reflection", self.external_knowledge)
         self.experiment_summaries = list(state.get("experiment_summaries", []))
 
-    def update_long_term_reflection(self, candidate: Candidate | None = None,
+    def update_long_term_reflection(self, candidate: Solution | None = None,
                                     *, force: bool = False) -> None:
         """Accumulate findings, then compress at OR-Agent's configured cadence."""
         if candidate is not None and candidate.reflection:
@@ -69,12 +69,13 @@ class CoordinateAgent:
                                          "\n".join(self.experiment_summaries))[-6000:]
         self.experiment_summaries.clear()
 
-    def research_round(self, number: int, root: Candidate) -> list[Candidate]:
+    def research_round(self, number: int, root: Solution) -> list[Solution]:
         """OR-Agent-style round: expand best unfinished leaves until exhausted."""
         self.flow_graph = FlowGraph(self.config.task.objective, root=root)
         if self.config.verbose:
             print(f">>>[CoordinateAgent {self.number}] Round {number} root: {root.id} "
                   f"(score={root.evaluation.score})")
+        solution_count = 0
         while parent := self.flow_graph.select(self.config.max_depth):
             local_depth = self.flow_graph.depths[parent.id]
             attempts = 5 if local_depth == 0 else 1
@@ -84,6 +85,7 @@ class CoordinateAgent:
                 ideas = self.ideation.propose(parent, memories, self.config.ideas_per_round,
                                               self.flow_graph, self.long_term_reflection)
                 for idea in ideas:
+                    solution_count += 1
                     identifier = uuid.uuid4().hex[:12]
                     directory = self.config.run_path / "candidates" / identifier
                     filename = "gpt.py" if self.config.task.kind == "heuristic" else "candidate.py"
@@ -113,13 +115,15 @@ class CoordinateAgent:
                     evaluation, history, reflection = self.experiment.run(
                         idea, path, evaluation, parent.evaluation.score,
                         self.long_term_reflection, max_repeats=repeats)
-                    candidate = Candidate(id=identifier, round=number, depth=parent.depth + 1,
+                    candidate = Solution(id=identifier, round=number, depth=parent.depth + 1,
                                           parent_id=parent.id, idea=idea, code_path=str(path),
+                                          coordinate_agent_id=self.number,
+                                          solution_count=solution_count,
                                           evaluation=evaluation, reflection=reflection,
                                           intermediate=history)
                     self.tree.add(candidate)
                     if self.config.verbose:
-                        print(f">>>[CoordinateAgent {self.number}] Candidate {candidate.id}: "
+                        print(f">>>[CoordinateAgent {self.number}] Solution {candidate.id}: "
                               f"status={evaluation.status}, score={evaluation.score}")
                     self.evolution.record_candidate(self.config.task.name, candidate)
                     if self.config.evolution_enabled:

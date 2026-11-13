@@ -9,7 +9,7 @@ from pathlib import Path
 
 from .config import Config
 from .evaluator import Evaluator
-from .utils import Candidate, Evaluation, Idea, Model, load_prompt, parse_code, render_prompt, update_code
+from .utils import Solution, Evaluation, Idea, Model, load_prompt, parse_code, render_prompt, update_code
 
 
 class CodingAgent:
@@ -17,7 +17,7 @@ class CodingAgent:
         self.config, self.model = config, model
         self.evaluator = evaluator or Evaluator(config)
 
-    def implement(self, idea: Idea, parent: Candidate | None, path: Path,
+    def implement(self, idea: Idea, parent: Solution | None, path: Path,
                   feedback: str = "", long_term_reflection: str = "") -> Path:
         parent_code = Path(parent.code_path).read_text(encoding="utf-8") if parent else ""
         problem = self.config.problem_path
@@ -52,7 +52,7 @@ class CodingAgent:
         path.write_text(code, encoding="utf-8")
         return path
 
-    def debug(self, idea: Idea, parent: Candidate | None, path: Path,
+    def debug(self, idea: Idea, parent: Solution | None, path: Path,
               feedback: str, long_term_reflection: str = "") -> Evaluation:
         """Revise the failed implementation, then evaluate the new version."""
         current = path.read_text(encoding="utf-8") if path.exists() else ""
@@ -92,7 +92,7 @@ class CodingAgent:
         path.write_text(revised, encoding="utf-8")
         return self.evaluator.evaluate(path)
 
-    def run(self, idea: Idea, parent: Candidate | None, path: Path,
+    def run(self, idea: Idea, parent: Solution | None, path: Path,
             long_term_reflection: str = "") -> Evaluation:
         """OR-Agent sequence: generate, evaluate, then debug while invalid."""
         evaluation = Evaluation(status="failed", feedback="Code generation failed")

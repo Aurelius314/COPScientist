@@ -8,7 +8,7 @@ import os
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, ClassVar, Protocol
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 
@@ -44,19 +44,169 @@ class Evaluation:
 
 
 @dataclass
-class Candidate:
-    id: str
-    round: int
-    depth: int
-    parent_id: str | None
-    idea: Idea
-    code_path: str
-    evaluation: Evaluation
+class Solution:
+    """One research solution, including its code, evaluation, and experiment history.
+
+    ``evaluation`` and ``intermediate`` retain the existing COPScientist storage
+    format. The direct fields follow OR-Agent's Solution interface.
+    """
+
+    _next_id: ClassVar[int] = 0
+
+    id: str | int | None = None
+    round: int = 0
+    depth: int = 0
+    parent_id: str | None = None
+    idea: Idea | str | None = None
+    code_path: str | None = None
+    evaluation: Evaluation = field(default_factory=lambda: Evaluation(status="pending"))
     reflection: str = ""
     intermediate: list[dict[str, Any]] = field(default_factory=list)
+    coordinate_agent_id: int | None = None
+    research_round: int | None = None
+    solution_count: int | None = None
+    code: str | None = None
+    code_filepath: str | None = None
+    output: str | None = None
+    output_filepath: str | None = None
+    metrics: dict[Any, Any] = field(default_factory=dict)
+    features: tuple[int, ...] | None = None
+    score: float | None = None
+    summary: str | None = None
+    intermediate_codes: list[str] = field(default_factory=list)
+    intermediate_outputs: list[str] = field(default_factory=list)
+    intermediate_metrics: list[dict] = field(default_factory=list)
+    intermediate_features: list[tuple[int, ...] | None] = field(default_factory=list)
+    intermediate_scores: list[float | None] = field(default_factory=list)
+    intermediate_actions: list[Any] = field(default_factory=list)
+    compact_summaries: list[str] = field(default_factory=list)
+    _sync_ready: bool = field(default=False, init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if self.id is None:
+            self.id = Solution._next_id
+            Solution._next_id += 1
+        elif isinstance(self.id, int):
+            Solution._next_id = max(Solution._next_id, self.id + 1)
+        if self.research_round is None:
+            self.research_round = self.round
+        if self.code_filepath is None:
+            self.code_filepath = self.code_path
+        if self.code_path is None:
+            self.code_path = self.code_filepath
+        if self.code is None and self.code_path and Path(self.code_path).is_file():
+            self.code = Path(self.code_path).read_text(encoding="utf-8")
+        if self.output_filepath is None:
+            self.output_filepath = self.evaluation.output_path
+        if self.output is None:
+            if self.output_filepath and Path(self.output_filepath).is_file():
+                self.output = Path(self.output_filepath).read_text(encoding="utf-8")
+            else:
+                self.output = self.evaluation.feedback
+        if not self.metrics:
+            self.metrics = dict(self.evaluation.metrics)
+        if self.features is None and self.evaluation.features is not None:
+            self.features = tuple(self.evaluation.features)
+        elif self.features is not None:
+            self.features = tuple(self.features)
+            self.evaluation.features = self.features
+        if self.score is None:
+            self.score = self.evaluation.score
+        else:
+            self.evaluation.score = self.score
+            if self.evaluation.status == "pending":
+                self.evaluation.status = "ok"
+        if self.metrics and not self.evaluation.metrics:
+            self.evaluation.metrics = dict(self.metrics)
+        if self.summary is None:
+            self.summary = self.reflection or None
+        elif not self.reflection:
+            self.reflection = self.summary
+        if self.intermediate and not self.intermediate_scores:
+            for record in self.intermediate:
+                result = record.get("evaluation", {})
+                snapshot = record.get("code_path")
+                self.intermediate_codes.append(
+                    Path(snapshot).read_text(encoding="utf-8")
+                    if snapshot and Path(snapshot).is_file() else "")
+                self.intermediate_outputs.append(result.get("feedback", ""))
+                self.intermediate_metrics.append(result.get("metrics", {}))
+                feature = result.get("features")
+                self.intermediate_features.append(tuple(feature) if feature is not None else None)
+                self.intermediate_scores.append(result.get("score"))
+                self.intermediate_actions.append(record.get("action"))
+        self._sync_ready = True
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        object.__setattr__(self, name, value)
+        if not self.__dict__.get("_sync_ready", False):
+            return
+        if name == "evaluation":
+            object.__setattr__(self, "score", value.score)
+            object.__setattr__(self, "metrics", dict(value.metrics))
+            object.__setattr__(self, "features", value.features)
+            object.__setattr__(self, "output_filepath", value.output_path)
+            object.__setattr__(self, "output", (
+                Path(value.output_path).read_text(encoding="utf-8")
+                if value.output_path and Path(value.output_path).is_file()
+                else value.feedback))
+        elif name in {"score", "metrics", "features"}:
+            setattr(self.evaluation, name, value)
+            if name == "score" and value is not None and self.evaluation.status == "pending":
+                self.evaluation.status = "ok"
+        elif name == "output_filepath":
+            self.evaluation.output_path = value
+        elif name == "output":
+            self.evaluation.feedback = (value or "")[-3000:]
+        elif name in {"code_path", "code_filepath"}:
+            object.__setattr__(self, "code_filepath" if name == "code_path" else "code_path", value)
+        elif name == "reflection":
+            object.__setattr__(self, "summary", value)
+        elif name == "summary":
+            object.__setattr__(self, "reflection", value or "")
+
+    def id_str(self, algorithm: str = "copscientist") -> str:
+        if algorithm == "copscientist":
+            return (f"coordinate{self.coordinate_agent_id}_round{self.research_round}"
+                    f"_count{self.solution_count}_id{self.id}")
+        return str(self.id)
+
+    def performance_str(self) -> str:
+        return f"**Metrics**:\n{self.metrics}\n\n**Score**:\n{self.score}"
+
+    def performance_summary_str(self) -> str:
+        return f"{self.performance_str()}\n\n**Summary**:\n{self.summary}"
+
+    def idea_performance_summary_str(self) -> str:
+        return f"**Idea**:\n{self.idea}\n\n{self.performance_summary_str()}"
+
+    def experiment_history(self, include_compact_summaries: bool = True,
+                           summarization_interval: int = 4) -> str:
+        parts = []
+        if include_compact_summaries:
+            parts.extend(f"Compact Summary Batch #{i + 1}:\n{summary}"
+                         for i, summary in enumerate(self.compact_summaries))
+        offset = len(self.compact_summaries) * summarization_interval
+        for index, action in enumerate(self.intermediate_actions):
+            parts.append(
+                f"Experiment #{offset + index + 1}:\n"
+                f"**Stdout**:\n{self.intermediate_outputs[index]}\n\n"
+                f"**Metrics**:\n{self.intermediate_metrics[index]}\n\n"
+                f"**Features**:\n{self.intermediate_features[index]}\n\n"
+                f"**Score**: {self.intermediate_scores[index]}\n\n"
+                f"**Reflections and actions**:\n{action}")
+        return "\n\n".join(parts)
+
+    def __str__(self) -> str:
+        return (f"**ID**\n{self.id}\n\n**Idea**:\n{self.idea}\n\n"
+                f"**Code**:\n```python\n{self.code or ''}\n```\n\n"
+                f"**Features**:\n{self.features}\n\n"
+                f"{self.performance_summary_str()}")
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        data = asdict(self)
+        data.pop("_sync_ready", None)
+        return data
 
 
 @dataclass

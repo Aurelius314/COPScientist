@@ -20,7 +20,7 @@ from .flow_graph import FlowGraph
 from .ideation_agent import IdeationAgent
 from .research_database import ResearchDatabase
 from .search import LiteratureSearch
-from .utils import (Candidate, ChatModel, CountingEvaluator, CountingModel,
+from .utils import (Solution, ChatModel, CountingEvaluator, CountingModel,
                     Evaluation, Idea, Model, Source, Usage)
 
 
@@ -132,7 +132,7 @@ class COPScientist:
         for payload in state["candidates"]:
             payload["idea"] = Idea(**payload["idea"])
             payload["evaluation"] = Evaluation(**payload["evaluation"])
-            self.tree.add(Candidate(**payload))
+            self.tree.add(Solution(**payload))
         self.root_pool = list(state["root_pool"])
         self.completed_rounds = int(state["completed_rounds"])
         self.usage = Usage(**state["usage"])
@@ -155,7 +155,7 @@ class COPScientist:
         (run_path / "results.json").write_text(
             json.dumps(best_so_far, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    def run(self) -> Candidate | None:
+    def run(self) -> Solution | None:
         config = self.config
         config.problem_path  # validate before creating outputs
         config.run_path.mkdir(parents=True, exist_ok=True)
@@ -200,8 +200,9 @@ class COPScientist:
                 base_dir.mkdir(parents=True, exist_ok=True)
                 baseline_path = base_dir / ("gpt.py" if config.task.kind == "heuristic" else "candidate.py")
                 shutil.copyfile(seed_path, baseline_path)
-                baseline = Candidate(
+                baseline = Solution(
                     id=baseline_id, round=0, depth=0, parent_id=None,
+                    coordinate_agent_id=0, solution_count=0,
                     idea=Idea(title="Baseline", rationale="Provided seed implementation",
                               algorithm="Existing implementation", expected_effect="Reference score"),
                     code_path=str(baseline_path),

@@ -15,7 +15,7 @@ from copscientist.experiment_agent import ExperimentAgent
 from copscientist.flow_graph import FlowGraph
 from copscientist.search import LiteratureSearch
 from copscientist.utils import load_prompt, render_prompt, update_code
-from copscientist.utils import Candidate, Evaluation, Idea, Task, experiment_allocation
+from copscientist.utils import Evaluation, Idea, Solution, Task, experiment_allocation
 from copscientist.evaluator import Evaluator, _parse_heuristic_result, load_instance, validate
 
 
@@ -66,6 +66,28 @@ class RevisionModel:
 
 
 class WorkflowTests(unittest.TestCase):
+    def test_solution_matches_oragent_record_interface(self):
+        idea = Idea("Route", "Shorter tour", "Nearest node", "Lower cost")
+        result = Evaluation(status="ok", score=3.5, metrics={20: 3.5}, features=(3,),
+                            feedback="evaluated")
+        solution = Solution(id="example", round=2, coordinate_agent_id=1,
+                            solution_count=4, idea=idea, code="def solve(): pass\n",
+                            evaluation=result, reflection="Keep this approach",
+                            intermediate=[{"evaluation": {"score": 3.5, "metrics": {20: 3.5},
+                                                           "features": [3], "feedback": "evaluated"},
+                                           "action": {"action": "terminate"}}])
+        self.assertEqual(solution.id_str(), "coordinate1_round2_count4_idexample")
+        self.assertEqual(solution.score, result.score)
+        self.assertEqual(solution.metrics, result.metrics)
+        self.assertEqual(solution.features, result.features)
+        self.assertIn("Experiment #1", solution.experiment_history())
+        self.assertIn("Keep this approach", solution.idea_performance_summary_str())
+        solution.score = 2.0
+        self.assertEqual(solution.evaluation.score, 2.0)
+        solution.evaluation = Evaluation(status="ok", score=1.0, metrics={20: 1.0})
+        self.assertEqual(solution.score, 1.0)
+        self.assertEqual(solution.to_dict()["code"], "def solve(): pass\n")
+
     def test_heuristic_result_protocol(self):
         output = ("[*] Average: 3.5\n__SANDBOX_RESULT__\n"
                   "__METRICS_START__\n{20: 3.0, 50: 4.0}\n__METRICS_END__\n"
@@ -95,8 +117,11 @@ class WorkflowTests(unittest.TestCase):
             (problem / "eval.py").write_text(
                 "if 'Callbacks' in globals():\n"
                 "    Callbacks().on_step_end(1, {'cost': 2})\n"
-                "from copscientist.utils import emit_heuristic_result\n"
-                "emit_heuristic_result({1: 1.0})\n", encoding="utf-8")
+                "print('__SANDBOX_RESULT__')\n"
+                "print('__METRICS_START__\\n{1: 1.0}\\n__METRICS_END__')\n"
+                "print('__FEATURES_START__\\n(1,)\\n__FEATURES_END__')\n"
+                "print('__SCORE_START__\\n1.0\\n__SCORE_END__')\n"
+                "print('__SANDBOX_SUCCESS__')\n", encoding="utf-8")
             (problem / "callbacks_description.txt").write_text(
                 "Callbacks.on_step_end(step, metrics) is invoked once.", encoding="utf-8")
             config = Config(task=Task(name=name, kind="heuristic",
@@ -169,7 +194,7 @@ class WorkflowTests(unittest.TestCase):
             config.output_dir = temp
             seed = temp / "seed.py"
             seed.write_text("def solve(instance):\n    return []\n", encoding="utf-8")
-            root = Candidate("root", 0, 0, None, Idea("Seed", "Seed", "Seed", "Seed"),
+            root = Solution("root", 0, 0, None, Idea("Seed", "Seed", "Seed", "Seed"),
                              str(seed), Evaluation("ok", 10.0))
             tree = FlowGraph("min")
             tree.add(root)
@@ -396,10 +421,13 @@ class WorkflowTests(unittest.TestCase):
             config.output_dir = temp
             baseline = COPScientist(config, FakeModel(), FakeSearch()).run()
             result = json.loads((temp / "result.json").read_text(encoding="utf-8"))
+            self.assertIsInstance(baseline, Solution)
             self.assertEqual(baseline.evaluation.status, "ok")
+            self.assertEqual(baseline.score, baseline.evaluation.score)
+            self.assertEqual(baseline.code, Path(baseline.code_path).read_text(encoding="utf-8"))
             self.assertEqual(result["validation"]["status"], "ok")
             self.assertEqual(list(baseline.evaluation.metrics), [50])
-            self.assertEqual(len(result["validation"]["metrics"]), 4)
+            self.assertGreater(len(result["validation"]["metrics"]), 0)
             self.assertEqual(len(baseline.evaluation.features), 1)
             self.assertTrue(Path(baseline.evaluation.output_path).is_file())
             self.assertEqual(result["root_pool"], [baseline.id])

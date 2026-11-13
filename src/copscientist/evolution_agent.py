@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .research_database import ResearchDatabase
-from .utils import Candidate, Source, better
+from .utils import Solution, Source, better
 
 
 class EvolutionAgent:
@@ -18,13 +18,13 @@ class EvolutionAgent:
     def record_sources(self, sources: list[Source]) -> None:
         self.database.record_sources(sources)
 
-    def record_candidate(self, task: str, candidate: Candidate) -> None:
+    def record_candidate(self, task: str, candidate: Solution) -> None:
         self.database.record_candidate(task, candidate)
 
     def retrieve(self, task: str, limit: int = 8) -> list[dict]:
         return self.database.retrieve(task, limit)
 
-    def distill(self, task: str, candidate: Candidate, parent: Candidate | None,
+    def distill(self, task: str, candidate: Solution, parent: Solution | None,
                 objective: str) -> None:
         """Store an evidence-linked idea outcome and experiment lesson."""
         evaluation = candidate.evaluation

@@ -9,7 +9,7 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .utils import Candidate, Evaluation, Idea, Source
+from .utils import Solution, Evaluation, Idea, Source
 
 
 class ResearchDatabase:
@@ -54,7 +54,7 @@ class ResearchDatabase:
         )
         self.connection.commit()
 
-    def record_candidate(self, task: str, candidate: Candidate) -> None:
+    def record_candidate(self, task: str, candidate: Solution) -> None:
         self.connection.execute(
             "INSERT OR REPLACE INTO candidates VALUES(?,?,?,?,?,?,?,?)",
             (candidate.id, task, candidate.round, candidate.parent_id,
@@ -83,7 +83,7 @@ class ResearchDatabase:
         ).fetchall()
         return [dict(row) for row in rows]
 
-    def candidates(self, task: str) -> list[Candidate]:
+    def candidates(self, task: str) -> list[Solution]:
         rows = self.connection.execute(
             "SELECT payload FROM candidates WHERE task=? ORDER BY created_at,id", (task,)
         ).fetchall()
@@ -92,5 +92,5 @@ class ResearchDatabase:
             data = json.loads(row["payload"])
             data["idea"] = Idea(**data["idea"])
             data["evaluation"] = Evaluation(**data["evaluation"])
-            result.append(Candidate(**data))
+            result.append(Solution(**data))
         return result

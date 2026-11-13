@@ -5,11 +5,13 @@ task:
   entry_function: select_next_node
   seed_file: seed_heuristic.py
   train_args:
+  - --problem_size
   - '50'
-  - .
+  - --mode
   - train
   validation_args:
+  - --problem_size
   - '50'
-  - .
+  - --mode
   - val
   description: Design a TSP constructive next-node heuristic.

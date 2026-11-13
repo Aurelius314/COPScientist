@@ -11,7 +11,7 @@ from pathlib import Path
 from .config import Config
 from .flow_graph import FlowGraph
 from .search import LiteratureSearch
-from .utils import Candidate, Idea, Model, Source, load_prompt, parse_json, render_prompt
+from .utils import Solution, Idea, Model, Source, load_prompt, parse_json, render_prompt
 
 
 def _grounded(items: object, field: str, allowed: set[str]) -> list[dict]:
@@ -60,7 +60,7 @@ class IdeationAgent:
             self.review = {"claims": [], "transferable_methods": [], "limitations": errors}
         return self.sources, errors
 
-    def propose(self, parent: Candidate | None, memory: list[dict], count: int,
+    def propose(self, parent: Solution | None, memory: list[dict], count: int,
                 tree: FlowGraph, long_term_reflection: str = "") -> list[Idea]:
         parent_context = None if parent is None else {
             "idea": asdict(parent.idea), "score": parent.evaluation.score,
