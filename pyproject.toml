@@ -7,7 +7,7 @@ name = "copscientist"
 version = "0.1.0"
 description = "Research agents for combinatorial optimization heuristic and solver design"
 requires-python = ">=3.11"
-dependencies = ["PyYAML>=6.0"]
+dependencies = ["PyYAML>=6.0", "openai>=1.0"]
 
 [project.optional-dependencies]
 heuristics = ["numpy>=1.26", "scipy>=1.11"]

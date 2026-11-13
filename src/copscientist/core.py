@@ -20,7 +20,7 @@ from .flow_graph import FlowGraph
 from .ideation_agent import IdeationAgent
 from .research_database import ResearchDatabase
 from .search import LiteratureSearch
-from .utils import (Solution, ChatModel, CountingEvaluator, CountingModel,
+from .utils import (Solution, LLMClient, CountingEvaluator, CountingModel,
                     Evaluation, Idea, Model, Source, Usage)
 
 
@@ -49,12 +49,14 @@ class COPScientist:
             model = self.model
         else:
             settings = self.config.role_models.get(role, {})
-            model = ChatModel(
-                str(settings.get("model", self.config.model)),
-                str(settings.get("base_url", self.config.base_url)),
-                str(settings.get("api_key_env", self.config.api_key_env)),
-                float(settings.get("temperature", 1.3 if role == "ideation" else 0.4)),
-                int(settings.get("max_retries", self.config.model_max_retries)),
+            model = LLMClient(
+                config=self.config,
+                llm_provider=str(settings.get("llm_provider", self.config.llm_provider)),
+                model_name=str(settings.get("model", self.config.model)),
+                base_url=settings.get("base_url", self.config.base_url),
+                api_key_env=settings.get("api_key_env", self.config.api_key_env),
+                temperature=float(settings.get("temperature", 1.3 if role == "ideation" else 0.4)),
+                max_retries=int(settings.get("max_retries", self.config.model_max_retries)),
             )
         return CountingModel(model, self.usage, role)
 

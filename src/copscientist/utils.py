@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import math
 import os
+import random
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, ClassVar, Protocol
-from urllib.request import Request, urlopen
-from urllib.error import HTTPError, URLError
+from typing import Any, ClassVar, Mapping, Protocol
 
 
 @dataclass
@@ -268,42 +268,100 @@ class Model(Protocol):
     def complete(self, system: str, user: str) -> str: ...
 
 
-class ChatModel:
-    def __init__(self, model: str, base_url: str, api_key_env: str,
-                 temperature: float = 0.4, max_retries: int = 10):
-        self.model = model
-        self.base_url = base_url.rstrip("/")
-        self.api_key_env = api_key_env
-        self.temperature = temperature
-        self.max_retries = max_retries
+class LLMClient:
+    """OR-Agent-style chat client with COPScientist's role configuration."""
+
+    _PROVIDERS = {
+        "openai": ("https://api.openai.com/v1", "OPENAI_API_KEY"),
+        "qwen": ("https://dashscope.aliyuncs.com/compatible-mode/v1", "DASHSCOPE_API_KEY"),
+        "deepseek": ("https://api.deepseek.com", "DEEPSEEK_API_KEY"),
+    }
+
+    def __init__(self, config: Any = None, llm_provider: str | None = None,
+                 model_name: str | None = None, **kwargs: Any):
+        if config is None:
+            import yaml
+            config = yaml.safe_load(
+                (Path(__file__).resolve().parents[2] / "config.yaml").read_text(encoding="utf-8"))
+        self.config = config
+        if isinstance(config, Mapping):
+            settings = config.get("llm", config.get("model", config))
+            if not isinstance(settings, Mapping):
+                raise ValueError("LLM config must be a mapping")
+            configured_model = settings.get("model_name", settings.get("model", ""))
+            configured_provider = settings.get("llm_provider", "openai")
+            configured_retries = settings.get("max_retries", 10)
+            configured_base_url = settings.get("base_url")
+            configured_key_env = settings.get("api_key_env")
+        else:
+            configured_model = config.model
+            configured_provider = getattr(config, "llm_provider", "openai")
+            configured_retries = config.model_max_retries
+            configured_base_url = config.base_url
+            configured_key_env = config.api_key_env
+
+        self.llm_provider = (llm_provider or configured_provider or "openai").lower()
+        self.model_name = model_name or configured_model
+        self.max_tries = int(kwargs.pop("max_retries", configured_retries))
+        self.temperature = float(kwargs.pop("temperature", 0.4))
+        if not self.model_name or self.max_tries < 1:
+            raise ValueError("Set llm.model and a positive llm.max_retries")
+
+        default_url, default_env = self._PROVIDERS.get(self.llm_provider, (None, None))
+        base_url = kwargs.pop("base_url", configured_base_url)
+        key_env = kwargs.pop("api_key_env", configured_key_env)
+        # Config's OpenAI defaults should not override another provider's defaults.
+        if self.llm_provider in {"qwen", "deepseek"}:
+            if base_url == self._PROVIDERS["openai"][0]:
+                base_url = None
+            if key_env == self._PROVIDERS["openai"][1]:
+                key_env = None
+        self.base_url = (base_url or default_url or "").rstrip("/")
+        self.api_key_env = key_env or default_env or ""
+        api_key = kwargs.pop("api_key", None) or os.environ.get(self.api_key_env)
+        if not self.base_url or not api_key:
+            raise RuntimeError(f"Set llm.base_url and {self.api_key_env or 'llm.api_key_env'}")
+
+        from openai import OpenAI
+        self.client = OpenAI(api_key=api_key, base_url=self.base_url, **kwargs)
+
+    def chat(self, messages: list[dict], **kwargs: Any) -> str:
+        """Return one nonempty Chat Completions response, retrying failed calls."""
+        options = {"temperature": self.temperature, **kwargs}
+        last_error: Exception | None = None
+        for attempt in range(self.max_tries):
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.model_name, messages=messages, **options)
+                choices = response.choices or []
+                content = choices[0].message.content if choices else None
+                if isinstance(content, str) and content:
+                    return content
+                raise ValueError("LLM returned no text completion")
+            except Exception as exc:
+                last_error = exc
+                if attempt + 1 < self.max_tries:
+                    time.sleep(random.uniform(0, min(2 ** attempt, 8)))
+        raise RuntimeError(f"LLM failed after {self.max_tries} attempts: {last_error}") from last_error
+
+    def multi_chat(self, messages_list: list[list[dict]] | list[dict],
+                   n: int = 1, **kwargs: Any) -> list[str]:
+        """Run independent conversations concurrently, or sample one n times."""
+        if not isinstance(messages_list, list) or not messages_list or n < 1:
+            raise ValueError("messages_list must be nonempty and n must be positive")
+        conversations = ([messages_list] if isinstance(messages_list[0], dict)
+                         else messages_list)
+        if len(conversations) > 1 and n != 1:
+            raise ValueError("n must be 1 for multiple conversations")
+        if len(conversations) == 1:
+            conversations = conversations * n
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(conversations))) as executor:
+            return list(executor.map(lambda messages: self.chat(messages, **kwargs), conversations))
 
     def complete(self, system: str, user: str) -> str:
-        key = os.environ.get(self.api_key_env)
-        if not key or not self.model:
-            raise RuntimeError(f"Set {self.api_key_env} and llm.model before running research")
-        body = json.dumps({"model": self.model, "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ], "temperature": self.temperature}).encode()
-        request = Request(
-            f"{self.base_url}/chat/completions", data=body,
-            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-        )
-        for attempt in range(self.max_retries):
-            try:
-                with urlopen(request, timeout=120) as response:
-                    data = json.load(response)
-                return data["choices"][0]["message"]["content"]
-            except HTTPError as exc:
-                if exc.code < 500 and exc.code != 429:
-                    raise
-                if attempt + 1 == self.max_retries:
-                    raise
-            except (URLError, TimeoutError):
-                if attempt + 1 == self.max_retries:
-                    raise
-            time.sleep(min(2 ** attempt, 8))
-        raise RuntimeError("Model returned no response")
+        """Adapt the current agents' two-prompt interface to ``chat``."""
+        return self.chat([{"role": "system", "content": system},
+                          {"role": "user", "content": user}])
 
 
 @dataclass

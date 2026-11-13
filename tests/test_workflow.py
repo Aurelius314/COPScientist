@@ -6,6 +6,8 @@ import unittest
 import uuid
 from contextlib import closing
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from copscientist.config import Config, PROJECT_ROOT, load_config
 from copscientist.coding_agent import CodingAgent
@@ -15,7 +17,7 @@ from copscientist.experiment_agent import ExperimentAgent
 from copscientist.flow_graph import FlowGraph
 from copscientist.search import LiteratureSearch
 from copscientist.utils import load_prompt, render_prompt, update_code
-from copscientist.utils import Evaluation, Idea, Solution, Task, experiment_allocation
+from copscientist.utils import Evaluation, Idea, LLMClient, Solution, Task, experiment_allocation
 from copscientist.evaluator import Evaluator, _parse_heuristic_result, load_instance, validate
 
 
@@ -66,6 +68,46 @@ class RevisionModel:
 
 
 class WorkflowTests(unittest.TestCase):
+    def test_llm_client_provider_chat_retry_and_multi_chat(self):
+        def response(content):
+            return SimpleNamespace(choices=[SimpleNamespace(
+                message=SimpleNamespace(content=content))])
+
+        with patch("openai.OpenAI") as factory, patch("copscientist.utils.time.sleep"):
+            create = factory.return_value.chat.completions.create
+            create.side_effect = [RuntimeError("temporary"), response("ready")]
+            client = LLMClient(config={"llm": {"llm_provider": "qwen", "model": "qwen-test",
+                                               "max_retries": 2}}, api_key="test-key")
+            self.assertEqual(client.complete("system", "user"), "ready")
+            self.assertEqual(factory.call_args.kwargs["base_url"],
+                             "https://dashscope.aliyuncs.com/compatible-mode/v1")
+            self.assertEqual(create.call_args.kwargs["messages"][0]["role"], "system")
+            create.side_effect = lambda **kwargs: response(kwargs["messages"][-1]["content"])
+            self.assertEqual(client.multi_chat([
+                [{"role": "user", "content": "first"}],
+                [{"role": "user", "content": "second"}]]), ["first", "second"])
+            self.assertEqual(client.multi_chat([{"role": "user", "content": "again"}], n=2),
+                             ["again", "again"])
+            with self.assertRaises(ValueError):
+                client.multi_chat([], n=1)
+
+    def test_llm_client_role_provider_override(self):
+        config = load_config(PROJECT_ROOT / "config.yaml", "tsp",
+                             {"llm_provider": "qwen", "model": "qwen-test"})
+        config.role_models = {"coding": {"llm_provider": "deepseek",
+                                         "model": "deepseek-test"}}
+        with patch.dict("os.environ", {"DASHSCOPE_API_KEY": "qwen-key",
+                                    "DEEPSEEK_API_KEY": "deepseek-key"}), patch("openai.OpenAI") as factory:
+            scientist = COPScientist(config, search=FakeSearch())
+            ideation = scientist._model_for("ideation").model
+            self.assertEqual(ideation.llm_provider, "qwen")
+            self.assertEqual(ideation.base_url,
+                             "https://dashscope.aliyuncs.com/compatible-mode/v1")
+            coding = scientist._model_for("coding").model
+            self.assertEqual(coding.model_name, "deepseek-test")
+            self.assertEqual(coding.base_url, "https://api.deepseek.com")
+            self.assertEqual(factory.call_args.kwargs["api_key"], "deepseek-key")
+
     def test_solution_matches_oragent_record_interface(self):
         idea = Idea("Route", "Shorter tour", "Nearest node", "Lower cost")
         result = Evaluation(status="ok", score=3.5, metrics={20: 3.5}, features=(3,),

@@ -53,6 +53,7 @@ class Config:
     search_required: bool = False
     evolution_enabled: bool = False
     model: str = ""
+    llm_provider: str = "openai"
     model_max_retries: int = 10
     base_url: str = "https://api.openai.com/v1"
     api_key_env: str = "OPENAI_API_KEY"
@@ -143,7 +144,7 @@ def load_config(path: Path | None = None, problem_name: str | None = None,
                   "reflection_clearance_period", "reflection_compression",
                   "external_knowledge_persistence_disabled", "evaluation_description_disabled",
                   "ideas_coordinated_generation_disabled", "python_path", "eval_env_vars"}
-    llm_fields = {"model", "base_url", "api_key_env"}
+    llm_fields = {"model", "llm_provider", "base_url", "api_key_env"}
     for key, value in overrides.items():
         if key in run_fields:
             run[key] = value
@@ -195,6 +196,7 @@ def load_config(path: Path | None = None, problem_name: str | None = None,
         search_required=bool(search.get("required", False)),
         evolution_enabled=bool(evolution.get("enabled", False)),
         model=str(llm.get("model", "")),
+        llm_provider=str(llm.get("llm_provider", "openai")),
         model_max_retries=int(llm.get("max_retries", 10)),
         base_url=str(llm.get("base_url", "https://api.openai.com/v1")),
         api_key_env=str(llm.get("api_key_env", "OPENAI_API_KEY")),

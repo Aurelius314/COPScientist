@@ -43,6 +43,7 @@ def main() -> int:
     parser.add_argument("--timeout-seconds", type=int)
     parser.add_argument("--python-path")
     parser.add_argument("--model")
+    parser.add_argument("--llm-provider")
     parser.add_argument("--base-url")
     parser.add_argument("--search-required", action="store_true", default=None)
     parser.add_argument("--output-dir", type=Path)
