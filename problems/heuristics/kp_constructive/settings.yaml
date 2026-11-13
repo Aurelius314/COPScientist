@@ -1,5 +1,5 @@
 task:
-  name: kp-constructive
+  name: kp_constructive
   kind: heuristic
   objective: max
   entry_function: select_next_item

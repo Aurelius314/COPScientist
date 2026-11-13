@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import time
 from dataclasses import asdict, dataclass, field
@@ -39,6 +40,7 @@ class Evaluation:
     feedback: str = ""
     output_path: str | None = None
     callbacks: str | None = None
+    features: tuple[int, ...] | None = None
 
 
 @dataclass

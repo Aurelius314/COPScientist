@@ -5,17 +5,15 @@ Adapted from https://github.com/google-deepmind/funsearch
 import numpy as np
 import pickle
 import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from heuristic_utils import parse_eval_args
 
-try:
-    from gpt import priority_v2 as priority
-except ImportError:
-    from gpt import priority
-
+from seed_heuristic import priority
 
 def get_valid_bin_indices(item: float, bins: np.ndarray) -> np.ndarray:
     """Returns indices of bins in which item can fit."""
     return np.nonzero((bins - item) >= 0)[0]
-
 
 def online_binpack(
         items: tuple[float, ...], bins: np.ndarray
@@ -37,11 +35,9 @@ def online_binpack(
     packing = [bin_items for bin_items in packing if bin_items]
     return packing, bins
 
-
-def evaluate(instances: dict) -> float:
-    """Evaluate heuristic function on a set of online binpacking instances."""
-    # List storing number of bins used for each instance.
-    num_bins = []
+def evaluate(instances: dict) -> tuple[float, dict[str, float]]:
+    """Return the mean bin count and the bin count for each instance."""
+    metrics = {}
     # Perform online binpacking for each instance.
     for name in instances:
         if name == 'l1_bound':
@@ -58,11 +54,15 @@ def evaluate(instances: dict) -> float:
         _, bins_packed = online_binpack(items.astype(float), bins)
         # If remaining capacity in a bin is equal to initial capacity, then it is
         # unused. Count number of used bins.
-        num_bins.append((bins_packed != capacity).sum())
-    # Score of heuristic function is negative of average number of bins used
-    # across instances (as we want to minimize number of bins).
-    return -np.mean(num_bins)
+        metrics[name] = float((bins_packed != capacity).sum())
+    if not metrics:
+        raise ValueError("Dataset contains no bin-packing instances")
+    return float(np.mean(list(metrics.values()))), metrics
 
+
+def get_feature(metrics: dict[str, float]) -> tuple[int, ...]:
+    """Discretize the bin count for each instance in dataset order."""
+    return tuple(int(value) for value in metrics.values())
 
 def is_valid_packing(
         packing: list[list[float, ...], ...], items: list[float], capacity: float
@@ -90,36 +90,35 @@ def is_valid_packing(
 
     return True
 
-
 if __name__ == "__main__":
-    import os
+    import traceback
 
-    print("[*] Running ...")
-
-    problem_size = int(sys.argv[1])
-    root_dir = sys.argv[2]  # reserved for compatibility
-    mood = sys.argv[3]
-    total = 0
-    number = 0
-    assert mood in ['train', 'val']
-    for scale in ['1k', '5k']:
-        for i in [1, 2]:
-            number = number + 1
-            file_name = f"weibull_{scale}_{mood}{i}.pickle"
-            basepath = os.path.dirname(__file__)
-            dataset_path = os.path.join(basepath, "dataset", file_name)
-
-            if not os.path.isfile(dataset_path):
-                from gen_inst import generate_datasets
-
-                generate_datasets()
-
-            dataset = pickle.load(open(dataset_path, 'rb'))
-
-            # Evaluate heuristic function on dataset
-            avg_num_bins = -evaluate(dataset)
-            l1_bound = dataset['l1_bound']
-            excess = (avg_num_bins - l1_bound) / l1_bound
-            total = total + excess * 100
-        print("[*] Average:")
-        print(total / number)
+    args = parse_eval_args(100)
+    try:
+        basepath = Path(__file__).resolve().parent / "dataset"
+        dataset_path = basepath / f"weibull_5k_{args.mode}.pickle"
+        with dataset_path.open("rb") as stream:
+            dataset = pickle.load(stream)
+        score, metrics = evaluate(dataset)
+        l1_bound = float(dataset["l1_bound"])
+        excess = (score - l1_bound) / l1_bound * 100
+        features = get_feature(metrics)
+        print(f"[*] Evaluated {dataset_path}")
+        print(f"[*] Average bins: {score}; L1 bound: {l1_bound}; excess: {excess:.2f}%")
+        print("__SANDBOX_RESULT__")
+        print("__METRICS_START__")
+        print(repr(metrics))
+        print("__METRICS_END__")
+        print("__FEATURES_START__")
+        print(repr(features))
+        print("__FEATURES_END__")
+        print("__SCORE_START__")
+        print(repr(score))
+        print("__SCORE_END__")
+        print("__SANDBOX_SUCCESS__")
+    except Exception as exc:
+        print("__SANDBOX_ERROR__:")
+        print(f"Error type: {type(exc).__name__}")
+        print(f"Error message: {exc}")
+        traceback.print_exc()
+        raise SystemExit(1) from exc

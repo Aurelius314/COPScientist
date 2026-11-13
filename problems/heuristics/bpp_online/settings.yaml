@@ -4,7 +4,6 @@ task:
   objective: min
   entry_function: priority
   seed_file: seed_heuristic.py
-  aggregate: last
   train_args:
   - '100'
   - .

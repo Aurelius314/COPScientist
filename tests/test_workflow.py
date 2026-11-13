@@ -16,7 +16,7 @@ from copscientist.flow_graph import FlowGraph
 from copscientist.search import LiteratureSearch
 from copscientist.utils import load_prompt, render_prompt, update_code
 from copscientist.utils import Candidate, Evaluation, Idea, Task, experiment_allocation
-from copscientist.evaluator import Evaluator, load_instance, validate
+from copscientist.evaluator import Evaluator, _parse_heuristic_result, load_instance, validate
 
 
 class FakeSearch:
@@ -66,6 +66,15 @@ class RevisionModel:
 
 
 class WorkflowTests(unittest.TestCase):
+    def test_heuristic_result_protocol(self):
+        output = ("[*] Average: 3.5\n__SANDBOX_RESULT__\n"
+                  "__METRICS_START__\n{20: 3.0, 50: 4.0}\n__METRICS_END__\n"
+                  "__FEATURES_START__\n(3, 4)\n__FEATURES_END__\n"
+                  "__SCORE_START__\n3.5\n__SCORE_END__\n__SANDBOX_SUCCESS__\n")
+        self.assertEqual(_parse_heuristic_result(output), ({20: 3.0, 50: 4.0}, (3, 4), 3.5))
+        with self.assertRaises(ValueError):
+            _parse_heuristic_result("[*] Average: 3.5\n")
+
     def test_optional_callbacks_execute_inside_problem_evaluator(self):
         class CallbackModel:
             def complete(self, system, user):
@@ -86,7 +95,8 @@ class WorkflowTests(unittest.TestCase):
             (problem / "eval.py").write_text(
                 "if 'Callbacks' in globals():\n"
                 "    Callbacks().on_step_end(1, {'cost': 2})\n"
-                "print('Average: 1')\n", encoding="utf-8")
+                "from copscientist.utils import emit_heuristic_result\n"
+                "emit_heuristic_result({1: 1.0})\n", encoding="utf-8")
             (problem / "callbacks_description.txt").write_text(
                 "Callbacks.on_step_end(step, metrics) is invoked once.", encoding="utf-8")
             config = Config(task=Task(name=name, kind="heuristic",
@@ -388,6 +398,9 @@ class WorkflowTests(unittest.TestCase):
             result = json.loads((temp / "result.json").read_text(encoding="utf-8"))
             self.assertEqual(baseline.evaluation.status, "ok")
             self.assertEqual(result["validation"]["status"], "ok")
+            self.assertEqual(list(baseline.evaluation.metrics), [50])
+            self.assertEqual(len(result["validation"]["metrics"]), 4)
+            self.assertEqual(len(baseline.evaluation.features), 1)
             self.assertTrue(Path(baseline.evaluation.output_path).is_file())
             self.assertEqual(result["root_pool"], [baseline.id])
             self.assertEqual(result["usage"]["responses"], {})

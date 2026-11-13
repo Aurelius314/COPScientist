@@ -45,7 +45,7 @@ Run output goes to `runs/<problem>/` by default. `result.json` contains all cand
 
 ## Task contract
 
-Heuristic tasks use the existing `problems/heuristics/<task>/eval.py`. COPScientist copies `seed_heuristic.py` to an isolated candidate `gpt.py` and runs it against the original evaluator and dataset. The evaluator's `Average` output is the training score; the problem settings set `min` or `max`. Existing problem scripts and datasets are not edited during a run.
+Heuristic tasks use `problems/heuristics/<task>/eval.py`. COPScientist copies `seed_heuristic.py` to an isolated candidate `gpt.py` and runs it against the problem's evaluator and dataset. Each evaluator calls the candidate function on problem-specific train or validation instances, computes per-size or per-scale `metrics`, and emits the shared `__METRICS_*__`, `__FEATURES_*__`, and `__SCORE_*__` blocks. `features` discretizes each metric to an integer; `score` is the mean of the metrics. The main evaluator parses these blocks and follows the problem setting's `min` or `max` objective. Repeated runs average each metric and the score. Existing problem scripts and datasets are not edited during a run.
 
 Callback exploration is available when a problem provides `callbacks_description.txt` and its evaluator invokes a `Callbacks` class through the documented event API. Experiment Agent can generate or revise that class; COPScientist loads it in the evaluation subprocess and records its output. The bundled problems do not currently define callback events, so their experiments revise candidate code. The callback path is covered by a temporary-problem integration test.
 

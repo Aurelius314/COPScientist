@@ -1,4 +1,9 @@
-"""Execute candidate algorithms and return objective values plus diagnostics."""
+"""
+# Evaluator
+Evaluator class is used for evaluating solution functions.
+
+Execute candidate algorithms and return objective values plus diagnostics.
+"""
 
 from __future__ import annotations
 
@@ -22,23 +27,36 @@ from .config import Config
 from .utils import Evaluation
 
 
-_NUMBER = re.compile(r"^-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$")
-
-
-def _aggregate(stdout: str, mode: str = "mean") -> float:
+def _parse_heuristic_result(stdout: str) -> tuple[dict, tuple[int, ...], float]:
+    """Read the structured result emitted by a problem's eval.py."""
     lines = [line.strip() for line in stdout.splitlines()]
-    values = []
-    for index, line in enumerate(lines):
-        if "Average" not in line:
-            continue
-        match = re.search(r"Average[^:]*:\s*(-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)", line)
-        if match:
-            values.append(float(match.group(1)))
-        elif index + 1 < len(lines) and _NUMBER.fullmatch(lines[index + 1]):
-            values.append(float(lines[index + 1]))
-    if not values or any(not math.isfinite(value) for value in values):
-        raise ValueError("eval.py did not report a finite Average")
-    return values[-1] if mode == "last" else statistics.mean(values)
+    if "__SANDBOX_RESULT__" not in lines or "__SANDBOX_SUCCESS__" not in lines:
+        raise ValueError("eval.py did not report a successful structured result")
+
+    def field(name: str):
+        start, end = f"__{name}_START__", f"__{name}_END__"
+        if lines.count(start) != 1 or lines.count(end) != 1:
+            raise ValueError(f"eval.py must report exactly one {name} block")
+        left, right = lines.index(start), lines.index(end)
+        if right != left + 2:
+            raise ValueError(f"Malformed {name} block")
+        return ast.literal_eval(lines[left + 1])
+
+    metrics = field("METRICS")
+    features = field("FEATURES")
+    score = field("SCORE")
+    if not isinstance(metrics, dict) or not metrics:
+        raise ValueError("eval.py metrics must be a nonempty dict")
+    if any(type(key) not in (int, str) or isinstance(value, bool) or
+           not isinstance(value, (int, float)) or not math.isfinite(value)
+           for key, value in metrics.items()):
+        raise ValueError("eval.py metrics must contain finite numeric values")
+    if not isinstance(features, tuple) or len(features) != len(metrics) or any(
+            type(value) is not int for value in features):
+        raise ValueError("eval.py features must be an integer tuple matching metrics")
+    if isinstance(score, bool) or not isinstance(score, (int, float)) or not math.isfinite(score):
+        raise ValueError("eval.py score must be finite")
+    return metrics, features, float(score)
 
 
 class Evaluator:
@@ -100,7 +118,7 @@ class Evaluator:
         args = self.config.task.validation_args if validation else self.config.task.train_args
         if not args:
             raise ValueError("heuristic task requires train_args / validation_args")
-        scores = []
+        results = []
         outputs = []
         for _ in range(self.config.evaluation_repeats):
             result = self._run(
@@ -113,14 +131,20 @@ class Evaluator:
                 return Evaluation(status="failed", feedback=(result.stderr or result.stdout)[-3000:],
                                   output_path=self._save_output(code_path, output))
             try:
-                scores.append(_aggregate(result.stdout, self.config.task.aggregate))
-            except ValueError as exc:
+                results.append(_parse_heuristic_result(result.stdout))
+            except (ValueError, SyntaxError) as exc:
                 output = "\n".join(outputs + [result.stdout, result.stderr])
                 return Evaluation(status="failed", feedback=str(exc),
                                   output_path=self._save_output(code_path, output))
             outputs.append(result.stdout)
-        return Evaluation(status="ok", score=statistics.mean(scores),
-                          metrics={"scores": scores, "validation": validation},
+        keys = list(results[0][0])
+        if any(list(metrics) != keys for metrics, _, _ in results):
+            return Evaluation(status="failed", feedback="Repeated evaluations reported different metric keys",
+                              output_path=self._save_output(code_path, "\n".join(outputs)))
+        metrics = {key: statistics.mean(result[0][key] for result in results) for key in keys}
+        features = tuple(int(value) for value in metrics.values())
+        return Evaluation(status="ok", score=statistics.mean(result[2] for result in results),
+                          metrics=metrics, features=features,
                           feedback="\n".join(outputs)[-3000:],
                           output_path=self._save_output(code_path, "\n".join(outputs)))
 

@@ -6,27 +6,14 @@ import argparse
 from scipy.spatial import distance_matrix
 import logging
 import copy
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from heuristic_utils import emit_heuristic_result, parse_eval_args
 
-try:
-    from gpt import select_next_item_v2 as select_next_item
-except:
-    from gpt import select_next_item
-
+from seed_heuristic import select_next_item
 
 def eval_heuristic(node_positions: np.ndarray, capacity) -> float:
-    '''
-    Generate solution for TSP problem using the GPT-generated heuristic algorithm.
-    
-    Parameters
-    ----------
-    node_positions : np.ndarray
-        2D array of node positions of shape (problem_size, 2).
-    
-    Returns
-    -------
-    obj : float
-        The length of the generated tour.
-    '''
+
     problem_size = node_positions.shape[0]
     # calculate distance matrix
     # set the starting node
@@ -55,49 +42,26 @@ def eval_heuristic(node_positions: np.ndarray, capacity) -> float:
     # calculate the length of the tour
     return solution_value
 
+if __name__ == "__main__":
+    import traceback
 
-if __name__ == '__main__':
-    print("[*] Running ...")
-
-    problem_size = int(sys.argv[1])
-    root_dir = sys.argv[2]
-    mood = sys.argv[3]
-    assert mood in ['train', 'val']
-
-    basepath = path.join(path.dirname(__file__), "dataset")
-    if not path.isfile(path.join(basepath, "train100_dataset.npy")):
-        from gen_inst import generate_datasets
-
-        generate_datasets()
-
-    if mood == 'train':
-        capacity = 25
-        dataset_path = path.join(basepath, f"train{problem_size}_dataset.npy")
-        node_positions = np.load(dataset_path)
-        n_instances = node_positions.shape[0]
-        print(f"[*] Dataset loaded: {dataset_path} with {n_instances} instances.")
-
-        objs = []
-        for i in range(n_instances):
-            obj = eval_heuristic(node_positions[i], capacity)
-            print(f"[*] Instance {i}: {obj}")
-            objs.append(obj)
-
-        print("[*] Average:")
-        print(np.mean(objs))
-
-    else:
-        for problem_size in [50, 100, 200]:
-            if problem_size == 50:
-                capacity = 12.5
-            else:
-                capacity = 25
-            dataset_path = path.join(basepath, f"val{problem_size}_dataset.npy")
-            logging.info(f"[*] Evaluating {dataset_path}")
-            node_positions = np.load(dataset_path)
-            n_instances = node_positions.shape[0]
-            objs = []
-            for i in range(n_instances):
-                obj = eval_heuristic(node_positions[i], capacity)
-                objs.append(obj)
-            print(f"[*] Average for {problem_size}: {np.mean(objs)}")
+    args = parse_eval_args(100)
+    try:
+        basepath = Path(__file__).resolve().parent / "dataset"
+        sizes = [args.problem_size] if args.mode == "train" else [50, 100, 200]
+        metrics = {}
+        for size in sizes:
+            capacity = 12.5 if size == 50 else 25
+            dataset_path = basepath / f"{args.mode}{size}_dataset.npy"
+            instances = np.load(dataset_path)
+            print(f"[*] Evaluating {dataset_path} with {len(instances)} instances.")
+            values = [float(eval_heuristic(items, capacity)) for items in instances]
+            metrics[size] = float(np.mean(values))
+            print(f"[*] Average for {size}: {metrics[size]}")
+        emit_heuristic_result(metrics)
+    except Exception as exc:
+        print("__SANDBOX_ERROR__:")
+        print(f"Error type: {type(exc).__name__}")
+        print(f"Error message: {exc}")
+        traceback.print_exc()
+        raise SystemExit(1) from exc
