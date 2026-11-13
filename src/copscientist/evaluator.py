@@ -2,13 +2,13 @@
 # Evaluator
 Evaluator class is used for evaluating solution functions.
 
-Execute candidate algorithms and return objective values plus diagnostics.
+Execute solution algorithms and return objective values plus diagnostics.
 """
 
 from __future__ import annotations
 
-import json
 import ast
+import json
 import gzip
 import getpass
 import importlib.util
@@ -23,51 +23,170 @@ import uuid
 import socket
 from pathlib import Path
 
-from .config import Config
-from .utils import Evaluation
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from copscientist.config import Config, load_config
+from copscientist.utils import Evaluation, Solution, solution_code_path
 
 
-def _parse_heuristic_result(stdout: str) -> tuple[dict, tuple[int, ...], float]:
-    """Read the structured result emitted by a problem's eval.py."""
+def _parse_result_value(source: str):
+    """Parse result literals, including NumPy scalar reprs, without executing code."""
+    def convert(node):
+        if isinstance(node, ast.Constant):
+            if type(node.value) not in (str, int, float, bool, type(None)):
+                raise ValueError("Unsupported literal in evaluator result")
+            if type(node.value) is float and not math.isfinite(node.value):
+                raise ValueError("Nonfinite metric in evaluator result")
+            return node.value
+        if isinstance(node, ast.Tuple):
+            return tuple(convert(item) for item in node.elts)
+        if isinstance(node, ast.List):
+            return [convert(item) for item in node.elts]
+        if isinstance(node, ast.Dict):
+            return {convert(key): convert(value) for key, value in zip(node.keys, node.values)}
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+            value = convert(node.operand)
+            if type(value) not in (int, float):
+                raise ValueError("Unary operator requires a number")
+            return value if isinstance(node.op, ast.UAdd) else -value
+        if (isinstance(node, ast.Call) and not node.keywords and len(node.args) == 1
+                and isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id in {"np", "numpy"}
+                and node.func.attr in {"float16", "float32", "float64", "int8", "int16",
+                                       "int32", "int64", "uint8", "uint16", "uint32", "uint64"}):
+            value = convert(node.args[0])
+            if type(value) not in (int, float):
+                raise ValueError("NumPy scalar representation requires a number")
+            return (float(value) if node.func.attr.startswith("float") else int(value))
+        raise ValueError("Unsupported expression in evaluator result")
+
+    return convert(ast.parse(source, mode="eval").body)
+
+
+def _parse_eval_result(stdout: str) -> tuple[dict | None, tuple[int, ...] | None, float]:
+    """Read the OR-Agent result protocol emitted by a problem's eval.py."""
     lines = [line.strip() for line in stdout.splitlines()]
-    if "__SANDBOX_RESULT__" not in lines or "__SANDBOX_SUCCESS__" not in lines:
+    if lines.count("__SANDBOX_RESULT__") != 1 or lines.count("__SANDBOX_SUCCESS__") != 1:
         raise ValueError("eval.py did not report a successful structured result")
+    result_start = lines.index("__SANDBOX_RESULT__")
+    result_end = lines.index("__SANDBOX_SUCCESS__")
+    if result_start >= result_end:
+        raise ValueError("eval.py result markers are out of order")
 
     def field(name: str):
         start, end = f"__{name}_START__", f"__{name}_END__"
         if lines.count(start) != 1 or lines.count(end) != 1:
             raise ValueError(f"eval.py must report exactly one {name} block")
         left, right = lines.index(start), lines.index(end)
-        if right != left + 2:
+        if not result_start < left < right < result_end or right != left + 2:
             raise ValueError(f"Malformed {name} block")
-        return ast.literal_eval(lines[left + 1])
+        return _parse_result_value(lines[left + 1])
 
     metrics = field("METRICS")
     features = field("FEATURES")
     score = field("SCORE")
-    if not isinstance(metrics, dict) or not metrics:
-        raise ValueError("eval.py metrics must be a nonempty dict")
-    if any(type(key) not in (int, str) or isinstance(value, bool) or
-           not isinstance(value, (int, float)) or not math.isfinite(value)
-           for key, value in metrics.items()):
-        raise ValueError("eval.py metrics must contain finite numeric values")
-    if not isinstance(features, tuple) or len(features) != len(metrics) or any(
-            type(value) is not int for value in features):
-        raise ValueError("eval.py features must be an integer tuple matching metrics")
+    if metrics is not None and not isinstance(metrics, dict):
+        raise ValueError("eval.py metrics must be a dict or None")
+    if features is not None and (not isinstance(features, tuple) or any(
+            type(value) is not int for value in features)):
+        raise ValueError("eval.py features must be an integer tuple or None")
     if isinstance(score, bool) or not isinstance(score, (int, float)) or not math.isfinite(score):
         raise ValueError("eval.py score must be finite")
     return metrics, features, float(score)
 
 
+def _average_metrics(records: list[dict | None]) -> dict:
+    """Average matching numeric metrics while retaining detailed run data."""
+    if len(records) == 1:
+        return records[0] or {}
+
+    def combine(values):
+        if all(type(value) in (int, float) for value in values):
+            return statistics.mean(values)
+        if all(isinstance(value, dict) for value in values):
+            keys = list(values[0])
+            if all(list(value) == keys for value in values):
+                return {key: combine([value[key] for value in values]) for key in keys}
+        if all(value == values[0] for value in values):
+            return values[0]
+        raise ValueError("Metrics have different structures")
+
+    if any(record is None for record in records):
+        return {"runs": records}
+    try:
+        return combine(records)
+    except ValueError:
+        return {"runs": records}
+
+
 class Evaluator:
-    """Run existing eval.py scripts or validate solver outputs in subprocesses."""
+    """Evaluate a Solution through its problem's tests and preserve raw output."""
 
     def __init__(self, config: Config):
         self.config = config
+        self.problem_dir = config.problem_path
+        self.output_dir = config.run_path
+        self.function_to_evolve = config.task.entry_function
+        self.obj_type = config.task.objective
+        self.timeout_seconds = config.timeout_seconds
+        self.verbose = config.verbose
+        eval_path = self.problem_dir / "eval.py"
+        self.eval_code = eval_path.read_text(encoding="utf-8") if eval_path.is_file() else None
+        default_callbacks = self.problem_dir / "default_callbacks.py"
+        self.default_callbacks = (default_callbacks.read_text(encoding="utf-8")
+                                  if default_callbacks.is_file() else None)
+
+    def run(self, solution: Solution, callbacks: str | None = None,
+            *, validation: bool = False) -> tuple[str, dict | None, tuple[int, ...] | None, float | None]:
+        """Evaluate Solution.code and return OR-Agent's raw output/result tuple."""
+        code = solution.code
+        source_path = Path(solution.code_path) if solution.code_path else None
+        if code is None and source_path is not None and source_path.is_file():
+            code = source_path.read_text(encoding="utf-8")
+        if code is None:
+            raise ValueError("Solution has no code to evaluate")
+
+        solution_root = (self.output_dir / "solutions").resolve()
+        source_resolved = source_path.resolve() if source_path is not None else None
+        correct_kind = (source_resolved is not None and
+                        (source_resolved.is_relative_to(solution_root / self.config.task.kind)
+                         or source_resolved.parent.parent == solution_root))
+        use_existing = (source_path is not None and source_path.is_file()
+                        and correct_kind
+                        and source_path.read_text(encoding="utf-8") == code)
+        if use_existing:
+            code_path = source_path
+        else:
+            label = re.sub(r"[^A-Za-z0-9_-]", "_", solution.id_str())[:70]
+            code_path = solution_code_path(self.output_dir, self.config.task.kind, label)
+            if code_path.exists():
+                code_path = solution_code_path(
+                    self.output_dir, self.config.task.kind, f"{label}_{uuid.uuid4().hex[:8]}")
+            code_path.parent.mkdir(parents=True, exist_ok=False)
+            code_path.write_text(code, encoding="utf-8")
+        solution.code = code
+        solution.code_path = str(code_path)
+        evaluation = self.evaluate(code_path, validation=validation, callbacks=callbacks)
+        solution.evaluation = evaluation
+        raw_output = solution.output or evaluation.feedback
+        if evaluation.status != "ok":
+            return raw_output, None, None, None
+        return raw_output, evaluation.metrics, evaluation.features, evaluation.score
+
+    def evaluate_individual(self, solution: Solution) -> Solution:
+        """Evaluate one solution and return the updated record."""
+        if solution.code is None and not (solution.code_path and Path(solution.code_path).is_file()):
+            solution.evaluation = Evaluation(status="failed", feedback="Solution has no code to evaluate")
+            return solution
+        self.run(solution)
+        return solution
 
     @staticmethod
     def _save_output(code_path: Path, output: str) -> str:
-        target = code_path.parent / f"evaluation_{uuid.uuid4().hex[:10]}.txt"
+        prefix = code_path.stem.removesuffix("_solution")
+        target = code_path.parent / f"{prefix}_stdout_{uuid.uuid4().hex[:10]}.txt"
         target.write_text(output, encoding="utf-8")
         return str(target)
 
@@ -91,39 +210,69 @@ class Evaluator:
         return configured or sys.executable
 
     def _callback_path(self, code_path: Path, callbacks: str | None) -> str:
+        callbacks = callbacks or self.default_callbacks
         if callbacks is None:
             return "-"
         tree = ast.parse(callbacks)
         if not any(isinstance(node, ast.ClassDef) and node.name == "Callbacks"
                    for node in tree.body):
             raise ValueError("Callback code must define class Callbacks")
-        target = code_path.parent / f"callbacks_{uuid.uuid4().hex[:10]}.py"
+        prefix = code_path.stem.removesuffix("_solution")
+        target = code_path.parent / f"{prefix}_callbacks_{uuid.uuid4().hex[:10]}.py"
         target.write_text(callbacks, encoding="utf-8")
         return str(target)
 
     def evaluate(self, code_path: Path, *, validation: bool = False,
                  callbacks: str | None = None) -> Evaluation:
+        active_callbacks = callbacks or self.default_callbacks
         try:
-            callback_path = self._callback_path(code_path, callbacks)
-            if self.config.task.kind == "heuristic":
-                result = self._heuristic(code_path, validation, callback_path)
-            else:
-                result = self._solver(code_path, validation, callback_path)
-            result.callbacks = callbacks
+            callback_path = self._callback_path(code_path, active_callbacks)
+            result = self._evaluate_problem(code_path, validation, callback_path)
+            result.callbacks = active_callbacks
             return result
-        except (OSError, ValueError, SyntaxError, subprocess.TimeoutExpired) as exc:
-            return Evaluation(status="failed", feedback=str(exc)[:3000], callbacks=callbacks)
+        except subprocess.TimeoutExpired as exc:
+            def as_text(value):
+                return value.decode(errors="replace") if isinstance(value, bytes) else value or ""
 
-    def _heuristic(self, code_path: Path, validation: bool, callback_path: str) -> Evaluation:
-        args = self.config.task.validation_args if validation else self.config.task.train_args
-        if not args:
-            raise ValueError("heuristic task requires train_args / validation_args")
+            output = f"Evaluation timed out after {exc.timeout} seconds\n"
+            output += as_text(exc.stdout) + "\n" + as_text(exc.stderr)
+            return Evaluation(status="failed", feedback=output[-3000:],
+                              output_path=self._save_output(code_path, output),
+                              callbacks=active_callbacks)
+        except (OSError, ValueError, SyntaxError) as exc:
+            return Evaluation(status="failed", feedback=str(exc)[:3000], callbacks=active_callbacks)
+
+    def _evaluate_problem(self, code_path: Path, validation: bool, callback_path: str) -> Evaluation:
+        if self.eval_code is None:
+            raise ValueError(f"Problem has no eval.py: {self.problem_dir}")
+        if self.config.task.kind == "heuristic":
+            args = list(self.config.task.validation_args if validation else self.config.task.train_args)
+            if not args:
+                raise ValueError("heuristic task requires train_args / validation_args")
+        else:
+            args = ["--mode", "val" if validation else "train", "--solver_file", str(code_path),
+                    "--max_instances", str(self.config.task.max_instances)]
+            patterns = (self.config.task.validation_instances if validation
+                        and self.config.task.validation_instances else self.config.task.instances)
+            if patterns:
+                args.extend(["--instances", *patterns])
+            if callback_path != "-":
+                args.extend(["--callbacks_file", callback_path])
+        prefix = code_path.stem.removesuffix("_solution")
+        eval_snapshot = code_path.parent / f"{prefix}_eval.py"
+        eval_snapshot.write_text(self.eval_code, encoding="utf-8")
+        if "parse_eval_args(" in self.eval_code or "--root_dir" in self.eval_code:
+            if "--root_dir" not in args:
+                args.extend(["--root_dir", str(self.config.project_root)])
+            if "--file_output_prefix" not in args:
+                args.extend(["--file_output_prefix", str(code_path.parent / f"{prefix}_file_")])
         results = []
         outputs = []
         for _ in range(self.config.evaluation_repeats):
             result = self._run(
-                [self._python(), "-m", "copscientist.evaluator", "heuristic", str(code_path.parent),
-                 str(self.config.problem_path), callback_path, *args],
+                [self._python(), "-u", "-m", "copscientist.evaluator", "problem",
+                 self.config.task.kind, str(code_path), str(self.config.problem_path),
+                 str(eval_snapshot), callback_path, *args],
                 self.config.problem_path, self.config.timeout_seconds,
             )
             if result.returncode:
@@ -131,93 +280,20 @@ class Evaluator:
                 return Evaluation(status="failed", feedback=(result.stderr or result.stdout)[-3000:],
                                   output_path=self._save_output(code_path, output))
             try:
-                results.append(_parse_heuristic_result(result.stdout))
+                results.append(_parse_eval_result(result.stdout))
             except (ValueError, SyntaxError) as exc:
                 output = "\n".join(outputs + [result.stdout, result.stderr])
                 detail = (result.stderr or result.stdout)[-2500:]
                 return Evaluation(status="failed", feedback=f"{exc}: {detail}"[-3000:],
                                   output_path=self._save_output(code_path, output))
             outputs.append(result.stdout)
-        keys = list(results[0][0])
-        if any(list(metrics) != keys for metrics, _, _ in results):
-            return Evaluation(status="failed", feedback="Repeated evaluations reported different metric keys",
-                              output_path=self._save_output(code_path, "\n".join(outputs)))
-        metrics = {key: statistics.mean(result[0][key] for result in results) for key in keys}
-        features = tuple(int(value) for value in metrics.values())
+        metrics = _average_metrics([result[0] for result in results])
+        features = (results[0][1] if all(result[1] == results[0][1] for result in results)
+                    else None)
         return Evaluation(status="ok", score=statistics.mean(result[2] for result in results),
                           metrics=metrics, features=features,
                           feedback="\n".join(outputs)[-3000:],
                           output_path=self._save_output(code_path, "\n".join(outputs)))
-
-    def _solver(self, code_path: Path, validation: bool, callback_path: str) -> Evaluation:
-        paths = []
-        patterns = (self.config.task.validation_instances if validation and self.config.task.validation_instances
-                    else self.config.task.instances)
-        for pattern in patterns:
-            paths.extend(self.config.problem_path.glob(pattern))
-        paths = sorted(set(path for path in paths if path.is_file()))[:self.config.task.max_instances]
-        if not paths:
-            raise ValueError("No solver instances match task.instances")
-        scores = []
-        values = {}
-        gaps = {}
-        outputs = []
-        for path in paths:
-            result = self._run(
-                [self._python(), "-m", "copscientist.evaluator", "solver", str(code_path),
-                 self.config.task.entry_function, str(path), callback_path],
-                self.config.problem_path, self.config.timeout_seconds,
-            )
-            if result.returncode:
-                output = "\n".join(outputs + [result.stdout, result.stderr])
-                return Evaluation(status="failed", feedback=f"{path.name}: {(result.stderr or result.stdout)[-3000:]}",
-                                  output_path=self._save_output(code_path, output))
-            outputs.append(f"{path.name}:\n{result.stdout}\n{result.stderr}")
-            try:
-                payload = json.loads(result.stdout.splitlines()[-1])
-                score = float(payload["score"])
-            except (IndexError, KeyError, ValueError, json.JSONDecodeError) as exc:
-                return Evaluation(status="failed", feedback=f"Invalid result for {path.name}: {exc}",
-                                  output_path=self._save_output(code_path, "\n".join(outputs)))
-            if not math.isfinite(score):
-                return Evaluation(status="failed", feedback=f"Nonfinite score for {path.name}",
-                                  output_path=self._save_output(code_path, "\n".join(outputs)))
-            name = str(path.relative_to(self.config.problem_path)).replace("\\", "/")
-            values[name] = score
-            reference = self._reference(path)
-            if reference is not None and reference > 0:
-                gap = 100 * (score - reference) / reference
-                gaps[name] = gap
-                scores.append(gap)
-            else:
-                scores.append(score)
-        if gaps and len(gaps) != len(paths):
-            return Evaluation(status="failed", feedback="Reference values are missing for some instances; cannot mix gaps and raw objectives")
-        return Evaluation(status="ok", score=statistics.mean(scores),
-                          metrics={"instances": values, "gaps_percent": gaps,
-                                   "score_unit": "mean_gap_percent" if gaps else "mean_objective",
-                                   "validation": validation},
-                          feedback=(f"Validated {len(paths)} feasible solutions\n" +
-                                    "\n".join(outputs))[-3000:],
-                          output_path=self._save_output(code_path, "\n".join(outputs)))
-
-    def _reference(self, path: Path) -> float | None:
-        kind = self.config.task.entry_function
-        if kind == "tsp":
-            values_path = self.config.problem_path / "tsplib_euc_2d" / "optimal_values.json"
-            records = json.loads(values_path.read_text(encoding="utf-8"))["instances"]
-            return records.get(path.name.split(".")[0], {}).get("optimal_length")
-        if kind == "cvrp":
-            solution = self.config.problem_path / "X-solutions" / f"{path.stem}.sol"
-            if solution.is_file():
-                match = re.search(r"^Cost\s+(\d+(?:\.\d+)?)", solution.read_text(encoding="utf-8"), re.M)
-                return float(match.group(1)) if match else None
-        if kind == "jssp":
-            records = json.loads((self.config.problem_path / "bks.json").read_text(encoding="utf-8"))
-            return next((record["upper_bound"] for record in records
-                         if record["instance"] == path.stem), None)
-        return None
-
 
 def _lines(path: Path) -> list[str]:
     opener = gzip.open if path.suffix == ".gz" else open
@@ -361,52 +437,68 @@ def validate(kind: str, instance: dict, answer) -> float:
     raise ValueError(f"Unknown solver kind: {kind}")
 
 
-def _run_heuristic(candidate_dir: str, problem_dir: str,
-                   callback_path: str, args: list[str]) -> None:
-    candidate = Path(candidate_dir).resolve()
+def _run_problem(kind: str, solution_path: str, problem_dir: str,
+                 eval_snapshot_path: str, callback_path: str, args: list[str]) -> None:
+    solution = Path(solution_path).resolve()
     problem = Path(problem_dir).resolve()
-    sys.path.insert(0, str(candidate))
+    snapshot = Path(eval_snapshot_path).resolve()
+    sys.path.insert(0, str(solution.parent))
     sys.path.insert(1, str(problem))
-    # OR-Agent-style evaluators import seed_heuristic, while the current
-    # candidate is stored as gpt.py. Bind that import to the candidate file.
-    candidate_file = candidate / "gpt.py"
-    evaluator_source = (problem / "eval.py").read_text(encoding="utf-8")
-    if candidate_file.is_file() and re.search(
-            r"^\s*(?:from\s+seed_heuristic\s+import|import\s+seed_heuristic\b)",
-            evaluator_source, re.M):
-        spec = importlib.util.spec_from_file_location("seed_heuristic", candidate_file)
+    sys.path.insert(2, str(problem.parent))
+    if kind == "heuristic":
+        spec = importlib.util.spec_from_file_location("seed_solution", solution)
         if spec is None or spec.loader is None:
-            raise ValueError("Cannot import heuristic candidate")
+            raise ValueError("Cannot import heuristic solution")
         module = importlib.util.module_from_spec(spec)
-        sys.modules["seed_heuristic"] = module
+        sys.modules["seed_solution"] = module
         spec.loader.exec_module(module)
     sys.argv = [str(problem / "eval.py"), *args]
-    globals_for_eval = ({"Callbacks": runpy.run_path(callback_path)["Callbacks"]}
-                        if callback_path != "-" else {})
-    runpy.run_path(str(problem / "eval.py"), run_name="__main__",
-                   init_globals=globals_for_eval)
-
-
-def _run_solver(candidate_path: str, kind: str, instance_path: str,
-                callback_path: str) -> None:
-    spec = importlib.util.spec_from_file_location("candidate", candidate_path)
-    if spec is None or spec.loader is None:
-        raise ValueError("Cannot import candidate")
-    module = importlib.util.module_from_spec(spec)
+    namespace = {"__name__": "__main__", "__file__": str(problem / "eval.py")}
     if callback_path != "-":
-        module.Callbacks = runpy.run_path(callback_path)["Callbacks"]
-    spec.loader.exec_module(module)
-    instance = load_instance(kind, Path(instance_path))
-    answer = module.solve(instance)
-    score = validate(kind, instance, answer)
-    print(json.dumps({"score": score, "name": instance["name"]}))
+        namespace["Callbacks"] = runpy.run_path(callback_path)["Callbacks"]
+    source = snapshot.read_text(encoding="utf-8")
+    exec(compile(source, str(problem / "eval.py"), "exec"), namespace)
+
+
+def _test_evaluator(kind: str, problem_name: str) -> None:
+    """Evaluate a bundled seed through the same path used by research rounds."""
+    config = load_config(problem_name=problem_name)
+    if config.task.kind != kind:
+        raise ValueError(f"{problem_name} is a {config.task.kind} task, not {kind}")
+    if not config.task.seed_file:
+        raise ValueError(f"{problem_name} has no seed_file")
+    seed_path = config.problem_path / config.task.seed_file
+    solution = Solution(id=f"{problem_name}_seed", coordinate_agent_id=0, solution_count=0,
+                        code=seed_path.read_text(encoding="utf-8"))
+    config.output_dir = config.project_root / "runs" / "evaluator_test" / problem_name
+    raw_output, metrics, features, score = Evaluator(config).run(solution)
+    print(f"======== {kind}: {problem_name} ========")
+    print(f"solution: {solution.code_path}")
+    print(f"raw output:\n{raw_output}")
+    print(f"metrics: {metrics}")
+    print(f"features: {features}")
+    print(f"score: {score}")
+    if solution.evaluation.status != "ok":
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
-    mode, *arguments = sys.argv[1:]
-    if mode == "heuristic":
-        _run_heuristic(arguments[0], arguments[1], arguments[2], arguments[3:])
+    mode, *arguments = (sys.argv[1:] or ["all"])
+    if mode == "problem":
+        if len(arguments) < 5:
+            raise SystemExit("Internal problem mode requires kind, solution, problem, eval snapshot, and callbacks")
+        _run_problem(arguments[0], arguments[1], arguments[2], arguments[3],
+                     arguments[4], arguments[5:])
+    elif mode == "heuristic":
+        if len(arguments) > 1:
+            raise SystemExit("Usage: python -m copscientist.evaluator heuristic [problem_name]")
+        _test_evaluator("heuristic", arguments[0] if arguments else "tsp_constructive")
     elif mode == "solver":
-        _run_solver(*arguments)
+        if len(arguments) > 1:
+            raise SystemExit("Usage: python -m copscientist.evaluator solver [problem_name]")
+        _test_evaluator("solver", arguments[0] if arguments else "tsp")
+    elif mode == "all" and not arguments:
+        _test_evaluator("heuristic", "tsp_constructive")
+        _test_evaluator("solver", "tsp")
     else:
-        raise SystemExit(f"Unknown evaluator mode: {mode}")
+        raise SystemExit("Usage: python -m copscientist.evaluator [heuristic [problem_name] | solver [problem_name] | all]")

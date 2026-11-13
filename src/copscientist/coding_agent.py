@@ -1,4 +1,4 @@
-"""Translate an idea into executable candidate code and repair failures."""
+"""Translate an idea into executable solution code and repair failures."""
 
 from __future__ import annotations
 

@@ -66,7 +66,7 @@ class COPScientist:
         return self.config.project_root / "checkpoints" / name
 
     def save(self, name: str | None = None) -> Path:
-        """Snapshot config, all agent state, candidate code, and SQLite."""
+        """Snapshot config, all agent state, solution code, and SQLite."""
         if not self.root_pool:
             raise RuntimeError("No research state is available to checkpoint")
         name = name or (datetime.now(timezone.utc).strftime("%Y-%m-%d_%H-%M-%S")
@@ -80,15 +80,15 @@ class COPScientist:
             (stage / "config.json").write_text(
                 json.dumps(self.config.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
             state = {"completed_rounds": self.completed_rounds,
-                     "candidates": [candidate.to_dict() for candidate in self.tree.nodes.values()],
+                     "solutions": [solution.to_dict() for solution in self.tree.nodes.values()],
                      "root_pool": self.root_pool,
                      "usage": asdict(self.usage), "progress": self.progress,
                      "coordinates": [agent.state_dict() for agent in self.coordinates]}
             (stage / "state.json").write_text(
                 json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
-            source = self.config.run_path / "candidates"
+            source = self.config.run_path / "solutions"
             if source.is_dir():
-                shutil.copytree(source, stage / "candidates")
+                shutil.copytree(source, stage / "solutions")
             literature = self.config.run_path / "literature_review.json"
             if literature.is_file():
                 shutil.copyfile(literature, stage / "literature_review.json")
@@ -116,22 +116,22 @@ class COPScientist:
         saved_config = Config.from_dict(json.loads((source / "config.json").read_text(encoding="utf-8")))
         if saved_config.task != self.config.task or saved_config.run_path != self.config.run_path:
             raise ValueError("Checkpoint task and output directory must match the active config")
-        candidate_root = (self.config.run_path / "candidates").resolve()
-        for payload in state["candidates"]:
+        solution_root = (self.config.run_path / "solutions").resolve()
+        for payload in state["solutions"]:
             code_path = Path(payload["code_path"]).resolve()
-            if not code_path.is_relative_to(candidate_root):
-                raise ValueError(f"Checkpoint candidate path is outside the run: {code_path}")
-            if not (source / "candidates" / code_path.relative_to(candidate_root)).is_file():
-                raise FileNotFoundError(f"Checkpoint candidate code missing: {code_path}")
+            if not code_path.is_relative_to(solution_root):
+                raise ValueError(f"Checkpoint solution path is outside the run: {code_path}")
+            if not (source / "solutions" / code_path.relative_to(solution_root)).is_file():
+                raise FileNotFoundError(f"Checkpoint solution code missing: {code_path}")
         shutil.copyfile(source / "memory.sqlite3", self.config.run_path / "memory.sqlite3")
-        if (source / "candidates").is_dir():
-            shutil.copytree(source / "candidates", self.config.run_path / "candidates",
+        if (source / "solutions").is_dir():
+            shutil.copytree(source / "solutions", self.config.run_path / "solutions",
                             dirs_exist_ok=True)
         if (source / "literature_review.json").is_file():
             shutil.copyfile(source / "literature_review.json",
                             self.config.run_path / "literature_review.json")
         self.tree = FlowGraph(self.config.task.objective)
-        for payload in state["candidates"]:
+        for payload in state["solutions"]:
             payload["idea"] = Idea(**payload["idea"])
             payload["evaluation"] = Evaluation(**payload["evaluation"])
             self.tree.add(Solution(**payload))
@@ -198,19 +198,15 @@ class COPScientist:
                 if not seed_path.is_relative_to(config.problem_path) or not seed_path.is_file():
                     raise FileNotFoundError(seed_path)
                 baseline_id = uuid.uuid4().hex[:12]
-                base_dir = config.run_path / "candidates" / baseline_id
-                base_dir.mkdir(parents=True, exist_ok=True)
-                baseline_path = base_dir / ("gpt.py" if config.task.kind == "heuristic" else "candidate.py")
-                shutil.copyfile(seed_path, baseline_path)
                 baseline = Solution(
                     id=baseline_id, round=0, depth=0, parent_id=None,
                     coordinate_agent_id=0, solution_count=0,
                     idea=Idea(title="Baseline", rationale="Provided seed implementation",
                               algorithm="Existing implementation", expected_effect="Reference score"),
-                    code_path=str(baseline_path),
-                    evaluation=experiment.evaluate(baseline_path))
+                    code=seed_path.read_text(encoding="utf-8"))
+                experiment.evaluate_solution(baseline)
                 self.tree.add(baseline)
-                self.evolution.record_candidate(config.task.name, baseline)
+                self.evolution.record_solution(config.task.name, baseline)
                 if config.evolution_enabled:
                     self.evolution.distill(config.task.name, baseline, None, config.task.objective)
                 if baseline.evaluation.status != "ok":
@@ -230,7 +226,7 @@ class COPScientist:
                     break
                 roots = [self.tree.nodes[identifier] for identifier in self.root_pool
                          if self.tree.nodes[identifier].evaluation.status == "ok"]
-                roots.sort(key=lambda candidate: candidate.evaluation.score,
+                roots.sort(key=lambda solution: solution.evaluation.score,
                            reverse=config.task.objective == "max")
                 if not roots:
                     raise RuntimeError("No evaluated research root is available")
@@ -263,7 +259,7 @@ class COPScientist:
             (config.run_path / "result.json").write_text(json.dumps({
                 "task": config.task.name, "best": best.to_dict() if best else None,
                 "validation": asdict(validation) if validation else None,
-                "candidates": [node.to_dict() for node in self.tree.nodes.values()],
+                "solutions": [node.to_dict() for node in self.tree.nodes.values()],
                 "root_pool": self.root_pool, "completed_rounds": self.completed_rounds,
                 "usage": asdict(self.usage),
             }, ensure_ascii=False, indent=2), encoding="utf-8")

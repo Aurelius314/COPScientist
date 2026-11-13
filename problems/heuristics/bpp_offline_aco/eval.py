@@ -8,7 +8,7 @@ import traceback
 import numpy as np
 import numpy.typing as npt
 
-import seed_heuristic as solution_module
+import seed_solution as solution_module
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from heuristic_utils import emit_heuristic_result, parse_eval_args

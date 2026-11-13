@@ -3,7 +3,7 @@ task:
   kind: solver
   objective: min
   entry_function: tsp
-  seed_file: seed_solver.py
+  seed_file: seed_solution.py
   instances:
   - tsplib_euc_2d/berlin52.tsp.gz
   - tsplib_euc_2d/eil51.tsp.gz

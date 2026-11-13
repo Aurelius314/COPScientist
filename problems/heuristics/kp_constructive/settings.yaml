@@ -3,7 +3,7 @@ task:
   kind: heuristic
   objective: max
   entry_function: select_next_item
-  seed_file: seed_heuristic.py
+  seed_file: seed_solution.py
   train_args:
   - '100'
   - .

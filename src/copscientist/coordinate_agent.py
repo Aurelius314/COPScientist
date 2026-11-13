@@ -11,7 +11,8 @@ from .evolution_agent import EvolutionAgent
 from .experiment_agent import ExperimentAgent
 from .flow_graph import FlowGraph
 from .ideation_agent import IdeationAgent
-from .utils import Solution, Model, better, experiment_allocation, load_prompt, parse_json, render_prompt
+from .utils import (Solution, Model, better, experiment_allocation, load_prompt,
+                    parse_json, render_prompt, solution_code_path)
 
 
 class CoordinateAgent:
@@ -39,12 +40,12 @@ class CoordinateAgent:
         self.long_term_reflection = state.get("long_term_reflection", self.external_knowledge)
         self.experiment_summaries = list(state.get("experiment_summaries", []))
 
-    def update_long_term_reflection(self, candidate: Solution | None = None,
+    def update_long_term_reflection(self, solution: Solution | None = None,
                                     *, force: bool = False) -> None:
         """Accumulate findings, then compress at OR-Agent's configured cadence."""
-        if candidate is not None and candidate.reflection:
+        if solution is not None and solution.reflection:
             self.experiment_summaries.append(
-                f"{candidate.idea.title}: score={candidate.evaluation.score}; {candidate.reflection}")
+                f"{solution.idea.title}: score={solution.evaluation.score}; {solution.reflection}")
         if not self.experiment_summaries:
             return
         period = self.config.reflection_period
@@ -87,9 +88,12 @@ class CoordinateAgent:
                 for idea in ideas:
                     solution_count += 1
                     identifier = uuid.uuid4().hex[:12]
-                    directory = self.config.run_path / "candidates" / identifier
-                    filename = "gpt.py" if self.config.task.kind == "heuristic" else "candidate.py"
-                    path = directory / filename
+                    solution = Solution(id=identifier, round=number, depth=parent.depth + 1,
+                                         parent_id=parent.id, idea=idea,
+                                         coordinate_agent_id=self.number,
+                                         solution_count=solution_count)
+                    path = solution_code_path(self.config.run_path, self.config.task.kind,
+                                              solution.id_str())
                     evaluation = self.coding.run(idea, parent, path,
                                                  self.long_term_reflection)
                     if not path.exists():
@@ -115,28 +119,27 @@ class CoordinateAgent:
                     evaluation, history, reflection = self.experiment.run(
                         idea, path, evaluation, parent.evaluation.score,
                         self.long_term_reflection, max_repeats=repeats)
-                    candidate = Solution(id=identifier, round=number, depth=parent.depth + 1,
-                                          parent_id=parent.id, idea=idea, code_path=str(path),
-                                          coordinate_agent_id=self.number,
-                                          solution_count=solution_count,
-                                          evaluation=evaluation, reflection=reflection,
-                                          intermediate=history)
-                    self.tree.add(candidate)
+                    solution.code_path = str(path)
+                    solution.code = path.read_text(encoding="utf-8")
+                    solution.evaluation = evaluation
+                    solution.reflection = reflection
+                    solution.intermediate = history
+                    self.tree.add(solution)
                     if self.config.verbose:
-                        print(f">>>[CoordinateAgent {self.number}] Solution {candidate.id}: "
+                        print(f">>>[CoordinateAgent {self.number}] Solution {solution.id}: "
                               f"status={evaluation.status}, score={evaluation.score}")
-                    self.evolution.record_candidate(self.config.task.name, candidate)
+                    self.evolution.record_solution(self.config.task.name, solution)
                     if self.config.evolution_enabled:
-                        self.evolution.distill(self.config.task.name, candidate, parent,
+                        self.evolution.distill(self.config.task.name, solution, parent,
                                                self.config.task.objective)
                     if evaluation.status == "ok":
-                        self.update_long_term_reflection(candidate, force=True)
+                        self.update_long_term_reflection(solution, force=True)
                     # Root children may temporarily worsen; deeper children must improve.
                     if evaluation.status == "ok" and (
                         local_depth == 0 or better(evaluation.score, parent.evaluation.score,
                                                     self.config.task.objective)
                     ):
-                        self.flow_graph.add(candidate, depth=local_depth + 1)
+                        self.flow_graph.add(solution, depth=local_depth + 1)
                 if self.flow_graph.children[parent.id]:
                     break
             if local_depth == 0 and not self.flow_graph.children[parent.id]:

@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import traceback
 import torch
 from torch.distributions import Categorical
-import seed_heuristic as solution_module
+import seed_solution as solution_module
 from heuristic_utils import emit_heuristic_result, parse_eval_args
 
 heuristics = solution_module.heuristics

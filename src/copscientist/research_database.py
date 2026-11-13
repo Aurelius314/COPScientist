@@ -1,4 +1,4 @@
-"""Persistent repository for candidate lineage, evidence, and sources."""
+"""Persistent repository for solution lineage, evidence, and sources."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ class ResearchDatabase:
         self.connection = sqlite3.connect(path)
         self.connection.row_factory = sqlite3.Row
         self.connection.executescript("""
-            CREATE TABLE IF NOT EXISTS candidates (
+            CREATE TABLE IF NOT EXISTS solutions (
                 id TEXT PRIMARY KEY, task TEXT NOT NULL, round INTEGER NOT NULL,
                 parent_id TEXT, score REAL, status TEXT NOT NULL, payload TEXT NOT NULL,
                 created_at TEXT NOT NULL
@@ -28,9 +28,9 @@ class ResearchDatabase:
             CREATE TABLE IF NOT EXISTS memories (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, task TEXT NOT NULL,
                 category TEXT NOT NULL CHECK(category IN ('ideation','experimentation')),
-                candidate_id TEXT, summary TEXT NOT NULL, evidence TEXT NOT NULL,
+                solution_id TEXT, summary TEXT NOT NULL, evidence TEXT NOT NULL,
                 created_at TEXT NOT NULL,
-                UNIQUE(task, category, candidate_id, summary)
+                UNIQUE(task, category, solution_id, summary)
             );
             CREATE TABLE IF NOT EXISTS sources (
                 url TEXT PRIMARY KEY, payload TEXT NOT NULL
@@ -54,25 +54,25 @@ class ResearchDatabase:
         )
         self.connection.commit()
 
-    def record_candidate(self, task: str, candidate: Solution) -> None:
+    def record_solution(self, task: str, solution: Solution) -> None:
         self.connection.execute(
-            "INSERT OR REPLACE INTO candidates VALUES(?,?,?,?,?,?,?,?)",
-            (candidate.id, task, candidate.round, candidate.parent_id,
-             candidate.evaluation.score, candidate.evaluation.status,
-             json.dumps(candidate.to_dict(), ensure_ascii=False),
+            "INSERT OR REPLACE INTO solutions VALUES(?,?,?,?,?,?,?,?)",
+            (solution.id, task, solution.round, solution.parent_id,
+             solution.evaluation.score, solution.evaluation.status,
+             json.dumps(solution.to_dict(), ensure_ascii=False),
              datetime.now(timezone.utc).isoformat()),
         )
         self.connection.commit()
 
-    def record_memories(self, task: str, candidate_id: str, ideation: str,
+    def record_memories(self, task: str, solution_id: str, ideation: str,
                         experiment: str, evidence: dict) -> None:
         evidence_json = json.dumps(evidence, ensure_ascii=False)
         now = datetime.now(timezone.utc).isoformat()
         self.connection.executemany(
-            "INSERT OR IGNORE INTO memories(task,category,candidate_id,summary,evidence,created_at) "
+            "INSERT OR IGNORE INTO memories(task,category,solution_id,summary,evidence,created_at) "
             "VALUES(?,?,?,?,?,?)",
-            [(task, "ideation", candidate_id, ideation, evidence_json, now),
-             (task, "experimentation", candidate_id, experiment, evidence_json, now)],
+            [(task, "ideation", solution_id, ideation, evidence_json, now),
+             (task, "experimentation", solution_id, experiment, evidence_json, now)],
         )
         self.connection.commit()
 
@@ -83,9 +83,9 @@ class ResearchDatabase:
         ).fetchall()
         return [dict(row) for row in rows]
 
-    def candidates(self, task: str) -> list[Solution]:
+    def solutions(self, task: str) -> list[Solution]:
         rows = self.connection.execute(
-            "SELECT payload FROM candidates WHERE task=? ORDER BY created_at,id", (task,)
+            "SELECT payload FROM solutions WHERE task=? ORDER BY created_at,id", (task,)
         ).fetchall()
         result = []
         for row in rows:

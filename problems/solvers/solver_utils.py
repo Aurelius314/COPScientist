@@ -8,6 +8,7 @@ import json
 import math
 from pathlib import Path
 import re
+import runpy
 import statistics
 import sys
 import traceback
@@ -20,11 +21,13 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 from copscientist.evaluator import load_instance, validate
 
 
-def _load_solver(source: Path):
+def _load_solver(source: Path, callbacks_file: Path | None = None):
     spec = importlib.util.spec_from_file_location("evaluated_solver", source)
     if spec is None or spec.loader is None:
         raise ValueError(f"Cannot import solver: {source}")
     module = importlib.util.module_from_spec(spec)
+    if callbacks_file is not None:
+        module.Callbacks = runpy.run_path(str(callbacks_file))["Callbacks"]
     spec.loader.exec_module(module)
     solve = getattr(module, "solve", None)
     if not callable(solve):
@@ -71,8 +74,10 @@ def _emit(metrics: dict[str, float]) -> None:
 def run(problem_dir: Path) -> None:
     parser = argparse.ArgumentParser(description="Evaluate a solver on bundled instances.")
     parser.add_argument("--mode", choices=("train", "val"), default="val")
-    parser.add_argument("--solver_file", type=Path, help="Solver module; defaults to seed_solver.py")
+    parser.add_argument("--solver_file", type=Path, help="Solver module; defaults to seed_solution.py")
+    parser.add_argument("--callbacks_file", type=Path, help="Optional Callbacks class for the solver")
     parser.add_argument("--max_instances", type=int, help="Limit instances for a quick check")
+    parser.add_argument("--instances", nargs="+", help="Override instance globs from settings.yaml")
     parser.add_argument("--root_dir", type=Path, help="Project root; defaults to this script's project")
     parser.add_argument("--file_output_prefix", default="", help="Reserved for CLI compatibility")
     args = parser.parse_args()
@@ -83,7 +88,8 @@ def run(problem_dir: Path) -> None:
             problem_dir = project_root / "problems" / "solvers" / problem_dir.name
         settings = yaml.safe_load((problem_dir / "settings.yaml").read_text(encoding="utf-8"))["task"]
         kind = settings["entry_function"]
-        patterns = settings.get("validation_instances") if args.mode == "val" else settings["instances"]
+        patterns = args.instances or (settings.get("validation_instances") if args.mode == "val"
+                                      else settings["instances"])
         patterns = patterns or settings["instances"]
         paths = sorted({path for pattern in patterns for path in problem_dir.glob(pattern)
                         if path.is_file()})
@@ -94,7 +100,7 @@ def run(problem_dir: Path) -> None:
         if not paths:
             raise ValueError(f"No {args.mode} instances found in {problem_dir}")
         source = (args.solver_file or problem_dir / settings["seed_file"]).resolve()
-        solve = _load_solver(source)
+        solve = _load_solver(source, args.callbacks_file)
         metrics = {}
         for path in paths:
             instance = load_instance(kind, path)

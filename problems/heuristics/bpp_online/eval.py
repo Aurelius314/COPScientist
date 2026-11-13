@@ -9,7 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from heuristic_utils import parse_eval_args
 
-from seed_heuristic import priority
+from seed_solution import priority
 
 def get_valid_bin_indices(item: float, bins: np.ndarray) -> np.ndarray:
     """Returns indices of bins in which item can fit."""

@@ -108,9 +108,9 @@ def _global_path(path: Path | None) -> Path:
 def _problem_settings(name: str) -> tuple[Path, str]:
     if not name or name in {".", ".."} or "/" in name or "\\" in name:
         raise ValueError("problem must be a single directory name")
-    candidates = [(PROJECT_ROOT / "problems" / kind / name / "settings.yaml", kind)
-                  for kind in ("heuristics", "solvers")]
-    found = [(path, kind) for path, kind in candidates if path.is_file()]
+    settings_paths = [(PROJECT_ROOT / "problems" / kind / name / "settings.yaml", kind)
+                      for kind in ("heuristics", "solvers")]
+    found = [(path, kind) for path, kind in settings_paths if path.is_file()]
     if len(found) != 1:
         raise FileNotFoundError(f"Expected one settings.yaml for {name!r} under problems/heuristics or problems/solvers")
     return found[0]

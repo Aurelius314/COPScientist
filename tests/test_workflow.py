@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import subprocess
 import unittest
 import uuid
 from contextlib import closing
@@ -18,7 +19,8 @@ from copscientist.flow_graph import FlowGraph
 from copscientist.search import LiteratureSearch
 from copscientist.utils import load_prompt, render_prompt, update_code
 from copscientist.utils import Evaluation, Idea, LLMClient, Solution, Task, experiment_allocation
-from copscientist.evaluator import Evaluator, _parse_heuristic_result, load_instance, validate
+from copscientist.evaluator import (Evaluator, _average_metrics, _parse_eval_result,
+                                    load_instance, validate)
 
 
 class FakeSearch:
@@ -135,9 +137,124 @@ class WorkflowTests(unittest.TestCase):
                   "__METRICS_START__\n{20: 3.0, 50: 4.0}\n__METRICS_END__\n"
                   "__FEATURES_START__\n(3, 4)\n__FEATURES_END__\n"
                   "__SCORE_START__\n3.5\n__SCORE_END__\n__SANDBOX_SUCCESS__\n")
-        self.assertEqual(_parse_heuristic_result(output), ({20: 3.0, 50: 4.0}, (3, 4), 3.5))
+        self.assertEqual(_parse_eval_result(output), ({20: 3.0, 50: 4.0}, (3, 4), 3.5))
         with self.assertRaises(ValueError):
-            _parse_heuristic_result("[*] Average: 3.5\n")
+            _parse_eval_result("[*] Average: 3.5\n")
+
+    def test_evaluator_accepts_oragent_metrics_and_independent_features(self):
+        output = ("__SANDBOX_RESULT__\n"
+                  "__METRICS_START__\n{'small': {'cost': np.float64(2.5)}}\n__METRICS_END__\n"
+                  "__FEATURES_START__\nNone\n__FEATURES_END__\n"
+                  "__SCORE_START__\nnp.float64(1.25)\n__SCORE_END__\n"
+                  "__SANDBOX_SUCCESS__\n")
+        self.assertEqual(_parse_eval_result(output),
+                         ({"small": {"cost": 2.5}}, None, 1.25))
+        self.assertEqual(_average_metrics([{"small": {"cost": 2.0}},
+                                           {"small": {"cost": 4.0}}]),
+                         {"small": {"cost": 3.0}})
+        with self.assertRaises(ValueError):
+            _parse_eval_result(output.replace("np.float64(1.25)", "__import__('os')"))
+
+    def test_evaluator_run_updates_solution_and_preserves_code_versions(self):
+        config = load_config(PROJECT_ROOT / "config.yaml", "tsp")
+        config.task.instances = ["tsplib_euc_2d/eil51.tsp.gz"]
+        directory = PROJECT_ROOT / "runs" / f"test_{uuid.uuid4().hex}"
+        directory.mkdir(parents=True)
+        try:
+            config.output_dir = directory
+            code = "def solve(instance):\n    return list(range(len(instance['coordinates'])))\n"
+            solution = Solution(id="solver", code=code)
+            evaluator = Evaluator(config)
+            raw, metrics, features, score = evaluator.run(solution)
+            original_path = Path(solution.code_path)
+            self.assertEqual(original_path.parent.parent.name, "solver")
+            self.assertEqual(original_path.name, f"{original_path.parent.name}_solution.py")
+            self.assertEqual(solution.evaluation.status, "ok")
+            self.assertEqual(solution.score, score)
+            self.assertEqual(solution.metrics, metrics)
+            self.assertEqual(len(features), 1)
+            self.assertTrue(Path(solution.output_filepath).is_file())
+            self.assertIn("eil51", raw)
+            solution.code = code + "\n"
+            evaluator.evaluate_individual(solution)
+            self.assertNotEqual(Path(solution.code_path), original_path)
+            self.assertEqual(original_path.read_text(encoding="utf-8"), code)
+            wrong_kind = directory / "solutions" / "heuristic" / "wrong" / "wrong_solution.py"
+            wrong_kind.parent.mkdir(parents=True)
+            wrong_kind.write_text(code, encoding="utf-8")
+            moved = Solution(id="wrong", code_path=str(wrong_kind), code=code)
+            evaluator.run(moved)
+            self.assertEqual(Path(moved.code_path).parent.parent.name, "solver")
+            self.assertEqual(wrong_kind.read_text(encoding="utf-8"), code)
+        finally:
+            shutil.rmtree(directory)
+
+    def test_evaluator_preserves_timeout_output_and_handles_missing_code(self):
+        config = load_config(PROJECT_ROOT / "config.yaml", "tsp")
+        config.task.instances = ["tsplib_euc_2d/eil51.tsp.gz"]
+        directory = PROJECT_ROOT / "runs" / f"test_{uuid.uuid4().hex}"
+        directory.mkdir(parents=True)
+        try:
+            config.output_dir = directory
+            evaluator = Evaluator(config)
+            missing = evaluator.evaluate_individual(Solution(id="missing"))
+            self.assertEqual(missing.evaluation.status, "failed")
+            code_path = directory / "solution.py"
+            code_path.write_text("def solve(instance): return []\n", encoding="utf-8")
+            with patch.object(evaluator, "_run", side_effect=subprocess.TimeoutExpired(
+                    "python", 2, output=b"partial stdout")):
+                result = evaluator.evaluate(code_path)
+            self.assertEqual(result.status, "failed")
+            self.assertIn("partial stdout", Path(result.output_path).read_text(encoding="utf-8"))
+        finally:
+            shutil.rmtree(directory)
+
+    def test_evaluator_executes_saved_eval_snapshot(self):
+        name = f"snapshot_{uuid.uuid4().hex}"
+        problem = PROJECT_ROOT / "problems" / "heuristics" / name
+        directory = PROJECT_ROOT / "runs" / f"test_{uuid.uuid4().hex}"
+        problem.mkdir(parents=True)
+        directory.mkdir(parents=True)
+        try:
+            original = ("from seed_solution import solve\n"
+                        "print('__SANDBOX_RESULT__')\n"
+                        "print('__METRICS_START__\\n{1: 1.0}\\n__METRICS_END__')\n"
+                        "print('__FEATURES_START__\\n(1,)\\n__FEATURES_END__')\n"
+                        "print('__SCORE_START__\\n1.0\\n__SCORE_END__')\n"
+                        "print('__SANDBOX_SUCCESS__')\n")
+            (problem / "eval.py").write_text(original, encoding="utf-8")
+            config = Config(task=Task(name=name, kind="heuristic",
+                                      problem_dir=f"problems/heuristics/{name}",
+                                      objective="min", entry_function="solve",
+                                      train_args=["1", ".", "train"]), output_dir=directory)
+            evaluator = Evaluator(config)
+            (problem / "eval.py").write_text("raise RuntimeError('changed')\n", encoding="utf-8")
+            solution = Solution(id="snapshot", code="def solve(): return 1\n")
+            raw, metrics, features, score = evaluator.run(solution)
+            self.assertEqual((metrics, features, score), ({1: 1.0}, (1,), 1.0))
+            self.assertIn("__SANDBOX_SUCCESS__", raw)
+            copied = Path(solution.code_path).parent / f"{solution.id_str()}_eval.py"
+            self.assertEqual(copied.read_text(encoding="utf-8"), original)
+        finally:
+            shutil.rmtree(problem)
+            shutil.rmtree(directory)
+
+    def test_named_heuristic_solution_loads_seed_and_shared_helpers(self):
+        config = load_config(PROJECT_ROOT / "config.yaml", "bpp_online")
+        directory = PROJECT_ROOT / "runs" / f"test_{uuid.uuid4().hex}"
+        directory.mkdir(parents=True)
+        try:
+            config.output_dir = directory
+            seed = (config.problem_path / config.task.seed_file).read_text(encoding="utf-8")
+            solution = Solution(id="binpacking", code=seed)
+            raw, metrics, features, score = Evaluator(config).run(solution)
+            self.assertEqual(solution.evaluation.status, "ok")
+            self.assertEqual(list(metrics), ["train_0", "train_1"])
+            self.assertEqual(score, solution.score)
+            self.assertEqual(Path(solution.code_path).parent.parent.name, "heuristic")
+            self.assertIn("__SANDBOX_SUCCESS__", raw)
+        finally:
+            shutil.rmtree(directory)
 
     def test_optional_callbacks_execute_inside_problem_evaluator(self):
         class CallbackModel:
@@ -172,7 +289,7 @@ class WorkflowTests(unittest.TestCase):
                                       train_args=["1", ".", "train"],
                                       validation_args=["1", ".", "val"]),
                             output_dir=output, experiment_repeats=1, verbose=False)
-            code = output / "candidate" / "gpt.py"
+            code = output / "solution" / "test_solution.py"
             code.parent.mkdir()
             code.write_text("def solve(instance):\n    return []\n", encoding="utf-8")
             agent = ExperimentAgent(config, CallbackModel())
@@ -222,10 +339,10 @@ class WorkflowTests(unittest.TestCase):
             def retrieve(self, task):
                 return []
 
-            def record_candidate(self, task, candidate):
+            def record_solution(self, task, solution):
                 pass
 
-            def distill(self, task, candidate, parent, objective):
+            def distill(self, task, solution, parent, objective):
                 pass
 
         config = load_config(PROJECT_ROOT / "config.yaml", "tsp")
@@ -271,7 +388,7 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(first["completed_rounds"], 1)
             self.assertEqual(len(first["root_pool"]), 2)
             self.assertTrue((checkpoint / "memory.sqlite3").is_file())
-            baseline_code = Path(first["candidates"][0]["code_path"])
+            baseline_code = Path(first["solutions"][0]["code_path"])
             baseline_code.unlink()
             self.assertFalse(baseline_code.exists())
             resumed_config = Config.from_dict(json.loads((checkpoint / "config.json").read_text(encoding="utf-8")))
@@ -280,7 +397,7 @@ class WorkflowTests(unittest.TestCase):
             second = json.loads((temp / "result.json").read_text(encoding="utf-8"))
             self.assertEqual(second["completed_rounds"], 2)
             self.assertTrue(baseline_code.is_file())
-            self.assertEqual(len(second["candidates"]), 3)
+            self.assertEqual(len(second["solutions"]), 3)
             self.assertGreater(sum(second["usage"]["responses"].values()),
                                sum(first["usage"]["responses"].values()))
             self.assertEqual(len(json.loads((temp / "results_detailed.json").read_text(encoding="utf-8"))), 2)
@@ -332,7 +449,7 @@ class WorkflowTests(unittest.TestCase):
         try:
             model = RetryModel()
             result = CodingAgent(config, model, AcceptEvaluator()).run(
-                Idea("Route", "Test", "Order", "Shorter"), None, temp / "candidate.py")
+                Idea("Route", "Test", "Order", "Shorter"), None, temp / "solution.py")
             self.assertEqual(result.status, "ok")
             self.assertEqual(len(model.users), 2)
             self.assertIn("'(' was never closed", model.users[1])
@@ -366,7 +483,7 @@ class WorkflowTests(unittest.TestCase):
         temp = PROJECT_ROOT / "runs" / f"test_{uuid.uuid4().hex}"
         temp.mkdir(parents=True)
         try:
-            path = temp / "candidate.py"
+            path = temp / "solution.py"
             original = "def solve(instance):\n    return list(range(len(instance['coordinates'])))\n"
             path.write_text(original, encoding="utf-8")
             agent = ExperimentAgent(config, BadRevisionModel())
@@ -427,9 +544,12 @@ class WorkflowTests(unittest.TestCase):
             result = json.loads((temp / "result.json").read_text(encoding="utf-8"))
             resolved = json.loads((temp / "resolved_config.json").read_text(encoding="utf-8"))
             self.assertEqual(resolved["task"]["name"], "tsp")
-            self.assertEqual(len(result["candidates"]), 2)
-            self.assertEqual(result["candidates"][1]["parent_id"], result["candidates"][0]["id"])
-            self.assertEqual(result["candidates"][1]["evaluation"]["status"], "ok")
+            self.assertEqual(len(result["solutions"]), 2)
+            self.assertEqual(result["solutions"][1]["parent_id"], result["solutions"][0]["id"])
+            self.assertEqual(result["solutions"][1]["evaluation"]["status"], "ok")
+            child_path = Path(result["solutions"][1]["code_path"])
+            self.assertEqual(child_path.parent.parent.name, "solver")
+            self.assertEqual(child_path.name, f"{child_path.parent.name}_solution.py")
             self.assertEqual(model.coding_calls, 2)
             self.assertEqual(result["validation"]["status"], "ok")
             self.assertIsNotNone(best.evaluation.score)
@@ -439,17 +559,17 @@ class WorkflowTests(unittest.TestCase):
         finally:
             shutil.rmtree(temp)
 
-    def test_heuristic_candidate_is_isolated_from_seed(self):
+    def test_heuristic_solution_is_isolated_from_seed(self):
         config = load_config(PROJECT_ROOT / "config.yaml", "tsp_constructive")
         temp = PROJECT_ROOT / "runs" / f"test_{uuid.uuid4().hex}"
         temp.mkdir(parents=True)
         try:
-            candidate = temp / "gpt.py"
-            candidate.write_text("def select_next_node(*args, **kwargs):\n    raise RuntimeError('candidate marker')\n", encoding="utf-8")
-            result = ExperimentAgent(config).evaluate(candidate)
+            solution = temp / "test_solution.py"
+            solution.write_text("def select_next_node(*args, **kwargs):\n    raise RuntimeError('solution marker')\n", encoding="utf-8")
+            result = ExperimentAgent(config).evaluate(solution)
             self.assertEqual(result.status, "failed")
-            self.assertIn("candidate marker", result.feedback)
-            self.assertNotIn("candidate marker", (config.problem_path / config.task.seed_file).read_text(encoding="utf-8"))
+            self.assertIn("solution marker", result.feedback)
+            self.assertNotIn("solution marker", (config.problem_path / config.task.seed_file).read_text(encoding="utf-8"))
         finally:
             shutil.rmtree(temp)
 
@@ -467,6 +587,11 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(baseline.evaluation.status, "ok")
             self.assertEqual(baseline.score, baseline.evaluation.score)
             self.assertEqual(baseline.code, Path(baseline.code_path).read_text(encoding="utf-8"))
+            baseline_path = Path(baseline.code_path)
+            self.assertEqual(baseline_path.parent.parent.name, "heuristic")
+            self.assertEqual(baseline_path.name, f"{baseline.id_str()}_solution.py")
+            self.assertEqual((baseline_path.parent / f"{baseline.id_str()}_eval.py").read_text(encoding="utf-8"),
+                             (config.problem_path / "eval.py").read_text(encoding="utf-8"))
             self.assertEqual(result["validation"]["status"], "ok")
             self.assertEqual(list(baseline.evaluation.metrics), [50])
             self.assertGreater(len(result["validation"]["metrics"]), 0)
@@ -493,17 +618,17 @@ class WorkflowTests(unittest.TestCase):
             config.output_dir = temp
             COPScientist(config, RevisionModel(), FakeSearch()).run()
             result = json.loads((temp / "result.json").read_text(encoding="utf-8"))
-            candidates = result["candidates"]
-            self.assertEqual(len(candidates), 3)
-            self.assertEqual(candidates[2]["parent_id"], candidates[1]["id"])
-            self.assertEqual(len(candidates[1]["intermediate"]), 3)
+            solutions = result["solutions"]
+            self.assertEqual(len(solutions), 3)
+            self.assertEqual(solutions[2]["parent_id"], solutions[1]["id"])
+            self.assertEqual(len(solutions[1]["intermediate"]), 3)
             round_tree = json.loads((temp / "details" / "coordinate_0_round_1_tree.json").read_text(encoding="utf-8"))
             self.assertEqual(len(round_tree["nodes"]), 2)
-            self.assertIn(candidates[1]["id"], result["root_pool"])
-            self.assertNotIn(candidates[2]["id"], result["root_pool"])
-            initial = candidates[1]["intermediate"][0]["evaluation"]["score"]
-            self.assertLess(candidates[1]["evaluation"]["score"], initial)
-            self.assertIn("remaining =", Path(candidates[1]["code_path"]).read_text(encoding="utf-8"))
+            self.assertIn(solutions[1]["id"], result["root_pool"])
+            self.assertNotIn(solutions[2]["id"], result["root_pool"])
+            initial = solutions[1]["intermediate"][0]["evaluation"]["score"]
+            self.assertLess(solutions[1]["evaluation"]["score"], initial)
+            self.assertIn("remaining =", Path(solutions[1]["code_path"]).read_text(encoding="utf-8"))
         finally:
             shutil.rmtree(temp)
 

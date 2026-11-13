@@ -15,7 +15,7 @@ on 2026-11-12. Match each record's `instance` to an instance filename without
 not necessarily mean an independently reproduced proof. These bounds can
 change as better solutions or proofs are published.
 
-`seed_solver.py` uses the Most Work Remaining (MWKR) dispatching rule: at each
+`seed_solution.py` uses the Most Work Remaining (MWKR) dispatching rule: at each
 step it selects the job with the largest sum of processing times in its
 unscheduled operations (ties go to the smaller job ID). This follows the greedy
 dispatching baseline in [Runarsson, Schoenauer, and Sebag, *Pilot, Rollout and

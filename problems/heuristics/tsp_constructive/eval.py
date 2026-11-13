@@ -8,7 +8,7 @@ import argparse
 from scipy.spatial import distance_matrix
 import logging
 from copy import copy
-import seed_heuristic as solution_module  # Note: solution module script is generated and saved on the fly
+import seed_solution as solution_module  # Solution module is loaded for this evaluation.
 from typing import Dict, List, Tuple, Any
 
 # =====Load function to evolve=====
@@ -20,7 +20,7 @@ select_next_node = getattr(solution_module, "select_next_node")
 # =====Evaluation Function=====
 def eval_heuristic(node_positions: np.ndarray) -> float:
     '''
-    Generate solution for TSP problem using the GPT-generated heuristic algorithm.
+    Generate a TSP solution using the supplied heuristic algorithm.
     
     Parameters
     ----------

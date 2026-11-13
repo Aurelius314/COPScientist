@@ -6,7 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import torch
 from torch.distributions import Categorical
-import seed_heuristic as solution_module
+import seed_solution as solution_module
 from heuristic_utils import emit_heuristic_result, parse_eval_args
 
 heuristics = solution_module.heuristics
@@ -131,12 +131,12 @@ class ACO():
             mask[torch.arange(self.n_ants), new_item] = 0
             knapsack += self.weight[new_item] # (n_ants, m)
         for ant_idx in range(self.n_ants):
-            candidates = torch.nonzero(mask[ant_idx]) # (x, 1)
-            if len(candidates) > 1:
-                candidates.squeeze_()
-                test_knapsack = knapsack[ant_idx].unsqueeze(0).repeat(len(candidates), 1) # (x, m)
-                new_knapsack = test_knapsack + self.weight[candidates] # (x, m)
-                infeasible_idx = candidates[(new_knapsack > 1).any(dim=1)]
+            feasible_items = torch.nonzero(mask[ant_idx]) # (x, 1)
+            if len(feasible_items) > 1:
+                feasible_items.squeeze_()
+                test_knapsack = knapsack[ant_idx].unsqueeze(0).repeat(len(feasible_items), 1) # (x, m)
+                new_knapsack = test_knapsack + self.weight[feasible_items] # (x, m)
+                infeasible_idx = feasible_items[(new_knapsack > 1).any(dim=1)]
                 mask[ant_idx, infeasible_idx] = 0
         mask[:, -1] = 1
         return mask, knapsack

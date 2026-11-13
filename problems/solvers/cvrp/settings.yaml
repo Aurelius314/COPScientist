@@ -3,7 +3,7 @@ task:
   kind: solver
   objective: min
   entry_function: cvrp
-  seed_file: seed_solver.py
+  seed_file: seed_solution.py
   instances:
   - X/X-n101-k25.vrp
   - X/X-n106-k14.vrp

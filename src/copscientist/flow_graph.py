@@ -15,50 +15,50 @@ class FlowGraph:
         if root is not None:
             self.add(root, depth=0)
 
-    def add(self, candidate: Solution, *, depth: int | None = None) -> None:
-        if candidate.id in self.nodes:
-            raise ValueError(f"Duplicate solution: {candidate.id}")
-        if depth is None and candidate.parent_id and candidate.parent_id not in self.nodes:
-            raise ValueError(f"Missing parent: {candidate.parent_id}")
-        self.nodes[candidate.id] = candidate
-        self.children[candidate.id] = []
-        self.depths[candidate.id] = candidate.depth if depth is None else depth
-        if candidate.parent_id in self.children:
-            self.children[candidate.parent_id].append(candidate.id)
+    def add(self, solution: Solution, *, depth: int | None = None) -> None:
+        if solution.id in self.nodes:
+            raise ValueError(f"Duplicate solution: {solution.id}")
+        if depth is None and solution.parent_id and solution.parent_id not in self.nodes:
+            raise ValueError(f"Missing parent: {solution.parent_id}")
+        self.nodes[solution.id] = solution
+        self.children[solution.id] = []
+        self.depths[solution.id] = solution.depth if depth is None else depth
+        if solution.parent_id in self.children:
+            self.children[solution.parent_id].append(solution.id)
 
-    def mark_done(self, candidate_id: str) -> None:
-        self.done.add(candidate_id)
+    def mark_done(self, solution_id: str) -> None:
+        self.done.add(solution_id)
 
     def select(self, max_depth: int | None, rank: int = 0) -> Solution | None:
-        frontier = [candidate for candidate in self.nodes.values()
-                    if candidate.id not in self.done and not self.children[candidate.id]
-                    and (max_depth is None or self.depths[candidate.id] < max_depth)
-                    and candidate.evaluation.status == "ok"]
-        frontier.sort(key=lambda candidate: candidate.evaluation.score or 0,
+        frontier = [solution for solution in self.nodes.values()
+                    if solution.id not in self.done and not self.children[solution.id]
+                    and (max_depth is None or self.depths[solution.id] < max_depth)
+                    and solution.evaluation.status == "ok"]
+        frontier.sort(key=lambda solution: solution.evaluation.score or 0,
                       reverse=self.objective == "max")
         return frontier[rank % len(frontier)] if frontier else None
 
     def leaves(self) -> list[Solution]:
-        return [candidate for candidate in self.nodes.values()
-                if not self.children[candidate.id]]
+        return [solution for solution in self.nodes.values()
+                if not self.children[solution.id]]
 
     def finished(self, max_depth: int | None) -> bool:
         return self.select(max_depth) is None
 
     def to_dict(self) -> dict:
         return {"nodes": [
-            {"id": candidate.id, "parent_id": candidate.parent_id,
-             "depth": self.depths[candidate.id], "children": self.children[candidate.id],
-             "done": candidate.id in self.done,
-             "status": candidate.evaluation.status, "score": candidate.evaluation.score}
-            for candidate in self.nodes.values()
+            {"id": solution.id, "parent_id": solution.parent_id,
+             "depth": self.depths[solution.id], "children": self.children[solution.id],
+             "done": solution.id in self.done,
+             "status": solution.evaluation.status, "score": solution.evaluation.score}
+            for solution in self.nodes.values()
         ]}
 
     def best(self) -> Solution | None:
         best = None
-        for candidate in self.nodes.values():
-            if candidate.evaluation.status == "ok" and (
-                best is None or better(candidate.evaluation.score, best.evaluation.score, self.objective)
+        for solution in self.nodes.values():
+            if solution.evaluation.status == "ok" and (
+                best is None or better(solution.evaluation.score, best.evaluation.score, self.objective)
             ):
-                best = candidate
+                best = solution
         return best

@@ -8,7 +8,7 @@ from pathlib import Path
 
 from .config import Config
 from .evaluator import Evaluator
-from .utils import Evaluation, Idea, Model, better, load_prompt, parse_json, render_prompt, update_code
+from .utils import Evaluation, Idea, Model, Solution, better, load_prompt, parse_json, render_prompt, update_code
 
 
 class ExperimentAgent:
@@ -30,6 +30,11 @@ class ExperimentAgent:
                  callbacks: str | None = None) -> Evaluation:
         return self.evaluator.evaluate(code_path, validation=validation,
                                        callbacks=callbacks)
+
+    def evaluate_solution(self, solution: Solution, *, validation: bool = False,
+                          callbacks: str | None = None) -> Solution:
+        self.evaluator.run(solution, callbacks=callbacks, validation=validation)
+        return solution
 
     def reflect(self, idea: Idea, code: str, evaluation: Evaluation,
                 parent_score: float | None, history: list[dict],

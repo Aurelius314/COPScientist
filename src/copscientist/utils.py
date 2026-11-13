@@ -7,6 +7,7 @@ import json
 import math
 import os
 import random
+import re
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -123,19 +124,26 @@ class Solution:
         elif not self.reflection:
             self.reflection = self.summary
         if self.intermediate and not self.intermediate_scores:
-            for record in self.intermediate:
-                result = record.get("evaluation", {})
-                snapshot = record.get("code_path")
-                self.intermediate_codes.append(
-                    Path(snapshot).read_text(encoding="utf-8")
-                    if snapshot and Path(snapshot).is_file() else "")
-                self.intermediate_outputs.append(result.get("feedback", ""))
-                self.intermediate_metrics.append(result.get("metrics", {}))
-                feature = result.get("features")
-                self.intermediate_features.append(tuple(feature) if feature is not None else None)
-                self.intermediate_scores.append(result.get("score"))
-                self.intermediate_actions.append(record.get("action"))
+            self._sync_intermediate()
         self._sync_ready = True
+
+    def _sync_intermediate(self) -> None:
+        codes, outputs, metrics, features, scores, actions = [], [], [], [], [], []
+        for record in self.intermediate:
+            result = record.get("evaluation", {})
+            snapshot = record.get("code_path")
+            codes.append(Path(snapshot).read_text(encoding="utf-8")
+                         if snapshot and Path(snapshot).is_file() else "")
+            outputs.append(result.get("feedback", ""))
+            metrics.append(result.get("metrics", {}))
+            feature = result.get("features")
+            features.append(tuple(feature) if feature is not None else None)
+            scores.append(result.get("score"))
+            actions.append(record.get("action"))
+        for name, value in (("intermediate_codes", codes), ("intermediate_outputs", outputs),
+                            ("intermediate_metrics", metrics), ("intermediate_features", features),
+                            ("intermediate_scores", scores), ("intermediate_actions", actions)):
+            object.__setattr__(self, name, value)
 
     def __setattr__(self, name: str, value: Any) -> None:
         object.__setattr__(self, name, value)
@@ -164,6 +172,8 @@ class Solution:
             object.__setattr__(self, "summary", value)
         elif name == "summary":
             object.__setattr__(self, "reflection", value or "")
+        elif name == "intermediate":
+            self._sync_intermediate()
 
     def id_str(self, algorithm: str = "copscientist") -> str:
         if algorithm == "copscientist":
@@ -232,6 +242,15 @@ class Task:
             raise ValueError("objective must be min or max")
         if self.aggregate not in {"mean", "last"}:
             raise ValueError("aggregate must be mean or last")
+
+
+def solution_code_path(run_path: Path, kind: str, identifier: str) -> Path:
+    """Place every generated solution in its own task-type directory."""
+    if kind not in {"heuristic", "solver"}:
+        raise ValueError(f"Unknown solution kind: {kind}")
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", identifier):
+        raise ValueError("Solution identifier must contain only letters, digits, _ or -")
+    return run_path / "solutions" / kind / identifier / f"{identifier}_solution.py"
 
 
 def better(left: float | None, right: float | None, objective: str) -> bool:
@@ -366,7 +385,7 @@ class LLMClient:
 
 @dataclass
 class Usage:
-    """Count completed model responses and candidate evaluations by role."""
+    """Count completed model responses and solution evaluations by role."""
     responses: dict[str, int] = field(default_factory=dict)
     evaluations: dict[str, int] = field(default_factory=dict)
 
@@ -399,6 +418,12 @@ class CountingEvaluator:
         self.usage.evaluations[self.role] = self.usage.evaluations.get(self.role, 0) + 1
         return result
 
+    def run(self, solution: Solution, callbacks: str | None = None,
+            *, validation: bool = False):
+        result = self.evaluator.run(solution, callbacks=callbacks, validation=validation)
+        self.usage.evaluations[self.role] = self.usage.evaluations.get(self.role, 0) + 1
+        return result
+
 
 def parse_json(text: str) -> dict:
     text = text.strip()
@@ -414,7 +439,7 @@ def parse_code(text: str) -> str:
     text = text.strip()
     if text.startswith("```"):
         text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-    compile(text, "candidate.py", "exec")
+    compile(text, "solution.py", "exec")
     return text + "\n"
 
 
@@ -435,7 +460,7 @@ def update_code(code: str, response: str) -> str:
         if not old or updated.count(old) != 1:
             raise ValueError("SEARCH text must match exactly once")
         updated = updated.replace(old, new, 1)
-    compile(updated, "candidate.py", "exec")
+    compile(updated, "solution.py", "exec")
     return updated.rstrip() + "\n"
 
 

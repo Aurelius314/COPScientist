@@ -3,7 +3,7 @@ task:
   kind: solver
   objective: min
   entry_function: 3d-bpp
-  seed_file: seed_solver.py
+  seed_file: seed_solution.py
   instances:
   - instances_320/CLASS_1/N50/instance_01.txt
   - instances_320/CLASS_2/N50/instance_01.txt
