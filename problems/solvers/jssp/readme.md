@@ -14,3 +14,12 @@ on 2026-11-12. Match each record's `instance` to an instance filename without
 `status` and `lower_bound` describe the reported closure state; `closed` does
 not necessarily mean an independently reproduced proof. These bounds can
 change as better solutions or proofs are published.
+
+`seed_solver.py` uses the Most Work Remaining (MWKR) dispatching rule: at each
+step it selects the job with the largest sum of processing times in its
+unscheduled operations (ties go to the smaller job ID). This follows the greedy
+dispatching baseline in [Runarsson, Schoenauer, and Sebag, *Pilot, Rollout and
+Monte Carlo Tree Search Methods for Job Shop Scheduling*, Algorithm 1](https://www.cmap.polytechnique.fr/~nikolaus.hansen/proceedings/2012/LION/PDF/p87.pdf).
+MWKR is also a reported baseline in the [supplement to Zhang et al.,
+*Learning to Dispatch for Job Shop Scheduling via Deep Reinforcement Learning*
+(NeurIPS 2020)](https://proceedings.neurips.cc/paper/2020/file/11958dfee29b6709f48a9ba0387a2431-Supplemental.pdf).

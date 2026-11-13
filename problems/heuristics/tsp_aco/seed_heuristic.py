@@ -1,5 +1,3 @@
-"""Inverse-distance seed heuristic for ACO-TSP."""
-
 import numpy as np
 
 
