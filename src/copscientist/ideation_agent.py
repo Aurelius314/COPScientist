@@ -1,4 +1,6 @@
-"""Source-grounded idea generation for heuristic and solver design."""
+"""
+Ideation Agent: Source-grounded idea generation with web search for heuristic and solver design.
+"""
 
 from __future__ import annotations
 
@@ -59,7 +61,7 @@ class IdeationAgent:
         return self.sources, errors
 
     def propose(self, parent: Candidate | None, memory: list[dict], count: int,
-                tree: FlowGraph) -> list[Idea]:
+                tree: FlowGraph, long_term_reflection: str = "") -> list[Idea]:
         parent_context = None if parent is None else {
             "idea": asdict(parent.idea), "score": parent.evaluation.score,
             "feedback": parent.evaluation.feedback[-1500:],
@@ -67,6 +69,7 @@ class IdeationAgent:
         }
         context = {
             "task": asdict(self.config.task), "parent": parent_context,
+            "long_term_reflection": long_term_reflection,
             "review": self.review, "sources": [asdict(source) for source in self.sources],
             "memory": memory[:6], "tree_progress": [
                 {"id": node.id, "parent": node.parent_id, "title": node.idea.title,
@@ -74,17 +77,19 @@ class IdeationAgent:
                 for node in list(tree.nodes.values())[-15:]
             ], "count": count,
         }
-        result = parse_json(self.model.complete(
-            load_prompt("system_idea_generation_copscientist.txt"),
-            render_prompt("user_idea_generation_copscientist.txt",
-                          json.dumps(context, ensure_ascii=False)),
-        ))
         allowed = {source.url for source in self.sources}
-        ideas = []
-        for item in result.get("ideas", [])[:count]:
-            ideas.append(Idea(title=item["title"], rationale=item["rationale"],
+        user_prompt = render_prompt("user_idea_generation_copscientist.txt",
+                                    json.dumps(context, ensure_ascii=False))
+        for _ in range(5):
+            try:
+                result = parse_json(self.model.complete(
+                    load_prompt("system_idea_generation_copscientist.txt"), user_prompt))
+                ideas = [Idea(title=item["title"], rationale=item["rationale"],
                               algorithm=item["algorithm"], expected_effect=item["expected_effect"],
-                              sources=[url for url in item.get("sources", []) if url in allowed]))
-        if not ideas:
-            raise ValueError("Ideation Agent returned no valid ideas")
-        return ideas
+                              sources=[url for url in item.get("sources", []) if url in allowed])
+                         for item in result.get("ideas", [])[:count]]
+                if ideas:
+                    return ideas
+            except (ValueError, KeyError, TypeError):
+                pass
+        raise RuntimeError("Ideation Agent failed to return valid ideas after five attempts")

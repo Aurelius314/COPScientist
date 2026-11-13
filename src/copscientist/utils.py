@@ -47,6 +47,7 @@ class Candidate:
     code_path: str
     evaluation: Evaluation
     reflection: str = ""
+    intermediate: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -128,6 +129,27 @@ def parse_code(text: str) -> str:
         text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
     compile(text, "candidate.py", "exec")
     return text + "\n"
+
+
+def update_code(code: str, response: str) -> str:
+    """Apply OR-Agent-style SEARCH/REPLACE blocks or a complete Python module."""
+    marker = "<<<<<<< SEARCH\n"
+    if marker not in response:
+        return parse_code(response)
+    updated = code
+    blocks = response.split(marker)[1:]
+    if not blocks:
+        raise ValueError("No SEARCH/REPLACE blocks found")
+    for block in blocks:
+        if "\n=======\n" not in block or "\n>>>>>>> REPLACE" not in block:
+            raise ValueError("Malformed SEARCH/REPLACE block")
+        old, remainder = block.split("\n=======\n", 1)
+        new = remainder.split("\n>>>>>>> REPLACE", 1)[0]
+        if not old or updated.count(old) != 1:
+            raise ValueError("SEARCH text must match exactly once")
+        updated = updated.replace(old, new, 1)
+    compile(updated, "candidate.py", "exec")
+    return updated.rstrip() + "\n"
 
 
 PROMPT_DIR = Path(__file__).resolve().parents[2] / "prompts"

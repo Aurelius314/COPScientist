@@ -24,11 +24,13 @@ class Config:
     ideas_per_round: int = 2
     max_depth: int = 2
     debug_attempts: int = 1
-    experiment_repeats: int = 1
+    experiment_repeats: int = 3
+    evaluation_repeats: int = 1
     timeout_seconds: int = 300
     literature_queries: list[str] = field(default_factory=list)
     web_queries: list[str] = field(default_factory=list)
     search_results: int = 3
+    search_enabled: bool = False
     search_required: bool = False
     model: str = ""
     base_url: str = "https://api.openai.com/v1"
@@ -100,7 +102,8 @@ def load_config(path: Path | None = None, problem_name: str | None = None,
     search = dict(data.get("search", {}))
     llm = dict(data.get("llm", {}))
     run_fields = {"output_dir", "rounds", "coordinate_agents", "ideas_per_round",
-                  "max_depth", "debug_attempts", "experiment_repeats", "timeout_seconds"}
+                  "max_depth", "debug_attempts", "experiment_repeats", "evaluation_repeats",
+                  "timeout_seconds"}
     llm_fields = {"model", "base_url", "api_key_env"}
     for key, value in overrides.items():
         if key in run_fields:
@@ -120,11 +123,13 @@ def load_config(path: Path | None = None, problem_name: str | None = None,
         ideas_per_round=int(run.get("ideas_per_round", 2)),
         max_depth=int(run.get("max_depth", 2)),
         debug_attempts=int(run.get("debug_attempts", 1)),
-        experiment_repeats=int(run.get("experiment_repeats", 1)),
+        experiment_repeats=int(run.get("experiment_repeats", 3)),
+        evaluation_repeats=int(run.get("evaluation_repeats", 1)),
         timeout_seconds=int(run.get("timeout_seconds", 300)),
         literature_queries=list(search.get("literature_queries", [])),
         web_queries=list(search.get("web_queries", [])),
         search_results=int(search.get("results_per_query", 3)),
+        search_enabled=bool(search.get("enabled", False)),
         search_required=bool(search.get("required", False)),
         model=str(llm.get("model", "")),
         base_url=str(llm.get("base_url", "https://api.openai.com/v1")),
@@ -135,6 +140,7 @@ def load_config(path: Path | None = None, problem_name: str | None = None,
         raise ValueError("rounds and debug_attempts must be nonnegative")
     if any(value <= 0 for value in (config.coordinate_agents, config.ideas_per_round,
                                     config.max_depth, config.experiment_repeats,
+                                    config.evaluation_repeats,
                                     config.timeout_seconds, config.search_results)):
         raise ValueError("Agent counts, depth, repeats, timeout, and search results must be positive")
     return config

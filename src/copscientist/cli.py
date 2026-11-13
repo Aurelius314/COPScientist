@@ -21,6 +21,7 @@ def main() -> int:
     parser.add_argument("--max-depth", type=int)
     parser.add_argument("--debug-attempts", type=int)
     parser.add_argument("--experiment-repeats", type=int)
+    parser.add_argument("--evaluation-repeats", type=int)
     parser.add_argument("--timeout-seconds", type=int)
     parser.add_argument("--model")
     parser.add_argument("--base-url")

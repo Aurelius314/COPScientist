@@ -38,7 +38,7 @@ class COPScientist:
             experiment = ExperimentAgent(config, self.model)
             ideation = IdeationAgent(config, self.model, self.search)
             coding = CodingAgent(config, self.model)
-            sources, errors = ideation.prepare_review()
+            sources, errors = ideation.prepare_review() if config.search_enabled else ([], [])
             evolution.record_sources(sources)
             (config.run_path / "literature_review.json").write_text(
                 json.dumps({"review": ideation.review, "sources": [asdict(s) for s in sources],
@@ -69,8 +69,14 @@ class COPScientist:
                                            evolution, self.tree)
                            for i in range(config.coordinate_agents)]
             for round_number in range(1, config.rounds + 1):
+                # Select tested research roots by quality. No population,
+                # crossover, island assignment, or elite sampling is involved.
+                roots = [candidate for candidate in self.tree.nodes.values()
+                         if candidate.evaluation.status == "ok"]
+                roots.sort(key=lambda candidate: candidate.evaluation.score,
+                           reverse=config.task.objective == "max")
                 for agent in coordinates:
-                    agent.research_round(round_number)
+                    agent.research_round(round_number, roots[agent.number % len(roots)])
             best = self.tree.best()
             validation = experiment.evaluate(Path(best.code_path), validation=True) if best else None
             (config.run_path / "result.json").write_text(json.dumps({

@@ -67,7 +67,7 @@ class Evaluator:
             raise ValueError("heuristic task requires train_args / validation_args")
         scores = []
         outputs = []
-        for _ in range(self.config.experiment_repeats):
+        for _ in range(self.config.evaluation_repeats):
             result = self._run(
                 [sys.executable, "-m", "copscientist.evaluator", "heuristic", str(code_path.parent),
                  str(self.config.problem_path), *args],

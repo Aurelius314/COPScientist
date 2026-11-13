@@ -3,7 +3,7 @@ task:
   kind: heuristic
   objective: min
   entry_function: select_next_node
-  seed_file: gpt.py
+  seed_file: seed_heuristic.py
   train_args:
   - '50'
   - .

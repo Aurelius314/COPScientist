@@ -8,10 +8,12 @@ run:
   ideas_per_round: 2
   max_depth: 2
   debug_attempts: 1
-  experiment_repeats: 1
+  experiment_repeats: 3
+  evaluation_repeats: 1
   timeout_seconds: 300
 
 search:
+  enabled: false
   literature_queries:
     - traveling salesman constructive heuristic
     - vehicle routing insertion heuristic
