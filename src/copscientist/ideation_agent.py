@@ -77,19 +77,29 @@ class IdeationAgent:
                 for node in list(tree.nodes.values())[-15:]
             ], "count": count,
         }
+        for name in ("problem_description", "function_description"):
+            source = self.config.problem_path / f"{name}.txt"
+            if source.is_file():
+                context[name] = source.read_text(encoding="utf-8")[:8000]
         allowed = {source.url for source in self.sources}
-        user_prompt = render_prompt("user_idea_generation_copscientist.txt",
-                                    json.dumps(context, ensure_ascii=False))
-        for _ in range(5):
-            try:
-                result = parse_json(self.model.complete(
-                    load_prompt("system_idea_generation_copscientist.txt"), user_prompt))
-                ideas = [Idea(title=item["title"], rationale=item["rationale"],
-                              algorithm=item["algorithm"], expected_effect=item["expected_effect"],
-                              sources=[url for url in item.get("sources", []) if url in allowed])
-                         for item in result.get("ideas", [])[:count]]
-                if ideas:
-                    return ideas
-            except (ValueError, KeyError, TypeError):
-                pass
-        raise RuntimeError("Ideation Agent failed to return valid ideas after five attempts")
+        def generate(requested: int) -> list[Idea]:
+            request = {**context, "count": requested}
+            user_prompt = render_prompt("user_idea_generation_copscientist.txt",
+                                        json.dumps(request, ensure_ascii=False))
+            for _ in range(5):
+                try:
+                    result = parse_json(self.model.complete(
+                        load_prompt("system_idea_generation_copscientist.txt"), user_prompt))
+                    ideas = [Idea(title=item["title"], rationale=item["rationale"],
+                                  algorithm=item["algorithm"], expected_effect=item["expected_effect"],
+                                  sources=[url for url in item.get("sources", []) if url in allowed])
+                             for item in result.get("ideas", [])[:requested]]
+                    if ideas:
+                        return ideas
+                except (ValueError, KeyError, TypeError):
+                    pass
+            raise RuntimeError("Ideation Agent failed to return valid ideas after five attempts")
+
+        if self.config.ideas_coordinated_generation_disabled:
+            return [generate(1)[0] for _ in range(count)]
+        return generate(count)

@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 from urllib.request import Request, urlopen
+from urllib.error import HTTPError, URLError
 
 
 @dataclass
@@ -35,6 +37,8 @@ class Evaluation:
     score: float | None = None
     metrics: dict[str, Any] = field(default_factory=dict)
     feedback: str = ""
+    output_path: str | None = None
+    callbacks: str | None = None
 
 
 @dataclass
@@ -86,15 +90,40 @@ def better(left: float | None, right: float | None, objective: str) -> bool:
     return left < right if objective == "min" else left > right
 
 
+def experiment_allocation(parent_score: float | None, child_score: float | None,
+                          objective: str, base: int, minimum: int, cap: int,
+                          threshold: float, elitist_factor: float,
+                          is_elitist: bool) -> int:
+    """OR-Agent's score-dependent experiment budget without population fields."""
+    if parent_score is None or child_score is None:
+        allocated = base
+    else:
+        improvement = (child_score - parent_score if objective == "max"
+                       else parent_score - child_score)
+        relative = improvement / abs(parent_score) if parent_score else improvement
+        if relative > threshold:
+            allocated = min(int(base * (1 + relative / threshold)), cap)
+        elif relative > 0:
+            allocated = base
+        else:
+            allocated = minimum
+    if is_elitist:
+        allocated = int(allocated * elitist_factor)
+    return max(minimum, min(allocated, cap))
+
+
 class Model(Protocol):
     def complete(self, system: str, user: str) -> str: ...
 
 
 class ChatModel:
-    def __init__(self, model: str, base_url: str, api_key_env: str):
+    def __init__(self, model: str, base_url: str, api_key_env: str,
+                 temperature: float = 0.4, max_retries: int = 10):
         self.model = model
         self.base_url = base_url.rstrip("/")
         self.api_key_env = api_key_env
+        self.temperature = temperature
+        self.max_retries = max_retries
 
     def complete(self, system: str, user: str) -> str:
         key = os.environ.get(self.api_key_env)
@@ -103,14 +132,62 @@ class ChatModel:
         body = json.dumps({"model": self.model, "messages": [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
-        ], "temperature": 0.4}).encode()
+        ], "temperature": self.temperature}).encode()
         request = Request(
             f"{self.base_url}/chat/completions", data=body,
             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
         )
-        with urlopen(request, timeout=120) as response:
-            data = json.load(response)
-        return data["choices"][0]["message"]["content"]
+        for attempt in range(self.max_retries):
+            try:
+                with urlopen(request, timeout=120) as response:
+                    data = json.load(response)
+                return data["choices"][0]["message"]["content"]
+            except HTTPError as exc:
+                if exc.code < 500 and exc.code != 429:
+                    raise
+                if attempt + 1 == self.max_retries:
+                    raise
+            except (URLError, TimeoutError):
+                if attempt + 1 == self.max_retries:
+                    raise
+            time.sleep(min(2 ** attempt, 8))
+        raise RuntimeError("Model returned no response")
+
+
+@dataclass
+class Usage:
+    """Count completed model responses and candidate evaluations by role."""
+    responses: dict[str, int] = field(default_factory=dict)
+    evaluations: dict[str, int] = field(default_factory=dict)
+
+    @property
+    def total_responses(self) -> int:
+        return sum(self.responses.values())
+
+    @property
+    def total_evaluations(self) -> int:
+        return sum(self.evaluations.values())
+
+
+class CountingModel:
+    def __init__(self, model: Model, usage: Usage, role: str):
+        self.model, self.usage, self.role = model, usage, role
+
+    def complete(self, system: str, user: str) -> str:
+        response = self.model.complete(system, user)
+        self.usage.responses[self.role] = self.usage.responses.get(self.role, 0) + 1
+        return response
+
+
+class CountingEvaluator:
+    def __init__(self, evaluator: Any, usage: Usage, role: str):
+        self.evaluator, self.usage, self.role = evaluator, usage, role
+
+    def evaluate(self, code_path: Path, *, validation: bool = False,
+                 callbacks: str | None = None) -> Evaluation:
+        result = self.evaluator.evaluate(code_path, validation=validation, callbacks=callbacks)
+        self.usage.evaluations[self.role] = self.usage.evaluations.get(self.role, 0) + 1
+        return result
 
 
 def parse_json(text: str) -> dict:

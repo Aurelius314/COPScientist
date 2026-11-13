@@ -29,10 +29,10 @@ class FlowGraph:
     def mark_done(self, candidate_id: str) -> None:
         self.done.add(candidate_id)
 
-    def select(self, max_depth: int, rank: int = 0) -> Candidate | None:
+    def select(self, max_depth: int | None, rank: int = 0) -> Candidate | None:
         frontier = [candidate for candidate in self.nodes.values()
                     if candidate.id not in self.done and not self.children[candidate.id]
-                    and self.depths[candidate.id] < max_depth
+                    and (max_depth is None or self.depths[candidate.id] < max_depth)
                     and candidate.evaluation.status == "ok"]
         frontier.sort(key=lambda candidate: candidate.evaluation.score or 0,
                       reverse=self.objective == "max")
@@ -42,7 +42,7 @@ class FlowGraph:
         return [candidate for candidate in self.nodes.values()
                 if not self.children[candidate.id]]
 
-    def finished(self, max_depth: int) -> bool:
+    def finished(self, max_depth: int | None) -> bool:
         return self.select(max_depth) is None
 
     def to_dict(self) -> dict:

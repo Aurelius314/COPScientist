@@ -3,14 +3,33 @@ problem: tsp_constructive
 
 run:
   output_dir: null  # Defaults to runs/<problem>
-  rounds: 2
+  rounds: 10000
   coordinate_agents: 1
   ideas_per_round: 2
-  max_depth: 2
-  debug_attempts: 1
+  max_depth: 3
+  debug_attempts: 3
   experiment_repeats: 3
   evaluation_repeats: 1
+  max_evolutions: 500
+  verbose: true
+  autosave_interval_minutes: 180
+  dynamic_experiment_allocation: true
+  min_experiment_repeats: 1
+  max_experiment_repeats_cap: 12
+  improvement_threshold: 0.05
+  elitist_experiment_factor: 2.0
+  progressive_summarization: true
+  summarization_interval: 4
+  compact_history_length: 0
+  reflection_period: 0
+  reflection_clearance_period: null
+  reflection_compression: null
+  external_knowledge_persistence_disabled: false
+  evaluation_description_disabled: false
+  ideas_coordinated_generation_disabled: false
   timeout_seconds: 300
+  python_path: null
+  eval_env_vars: {}
 
 search:
   enabled: false
@@ -25,7 +44,14 @@ search:
   required: false
   brave_key_env: BRAVE_SEARCH_API_KEY
 
+evolution:
+  enabled: false
+
 llm:
   model: gpt-4.1-mini
+  max_retries: 10
   base_url: https://api.openai.com/v1
   api_key_env: OPENAI_API_KEY
+  # Optional role-specific overrides: coordinate, ideation, coding,
+  # experiment_reflect, experiment_summarize, literature_review.
+  roles: {}

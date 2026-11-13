@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import closing
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -39,6 +40,12 @@ class ResearchDatabase:
 
     def close(self) -> None:
         self.connection.close()
+
+    def backup(self, destination: Path) -> None:
+        """Create a consistent SQLite snapshot for a checkpoint."""
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with closing(sqlite3.connect(destination)) as target:
+            self.connection.backup(target)
 
     def record_sources(self, sources: list[Source]) -> None:
         self.connection.executemany(
