@@ -17,7 +17,7 @@ from copscientist.core import COPScientist
 from copscientist.experiment_agent import ExperimentAgent
 from copscientist.flow_graph import FlowGraph
 from copscientist.search import LiteratureSearch
-from copscientist.utils import load_prompt, render_prompt, update_code
+from copscientist.utils import load_prompt, parse_code, render_prompt, update_code
 from copscientist.utils import Evaluation, Idea, LLMClient, Solution, Task, experiment_allocation
 from copscientist.evaluator import (Evaluator, _average_metrics, _parse_eval_result,
                                     load_instance, validate)
@@ -456,6 +456,83 @@ class WorkflowTests(unittest.TestCase):
         finally:
             shutil.rmtree(temp)
 
+    def test_coding_generation_includes_parent_research_context(self):
+        class RecordingModel:
+            user = ""
+
+            def complete(self, system, user):
+                self.user = user
+                return "def solve(instance):\n    return []\n"
+
+        class AcceptEvaluator:
+            def evaluate(self, path):
+                return Evaluation(status="ok", score=1.0)
+
+        config = load_config(PROJECT_ROOT / "config.yaml", "tsp")
+        temp = PROJECT_ROOT / "runs" / f"test_{uuid.uuid4().hex}"
+        temp.mkdir(parents=True)
+        try:
+            config.output_dir = temp
+            parent = Solution(id="parent", idea=Idea("Baseline", "Measured", "Tour", "Shorter"),
+                              code="def solve(instance):\n    return [0]\n",
+                              metrics={"gap": 3.0}, features=(3,), score=3.0,
+                              summary="Keep the feasible tour")
+            model = RecordingModel()
+            result = CodingAgent(config, model, AcceptEvaluator()).run(
+                Idea("Improve", "Test", "Swap", "Shorter"), parent, temp / "solution.py",
+                "Avoid repeated distances")
+            self.assertEqual(result.status, "ok")
+            self.assertIn('"parent_solution"', model.user)
+            self.assertIn('"score": 3.0', model.user)
+            self.assertIn('"required_signature": "def solve(instance)"', model.user)
+            self.assertIn("Keep the feasible tour", model.user)
+            self.assertIn("Avoid repeated distances", model.user)
+        finally:
+            shutil.rmtree(temp)
+
+    def test_coding_debug_retries_invalid_revision_with_full_output(self):
+        class RevisionModel:
+            def __init__(self):
+                self.users = []
+
+            def complete(self, system, user):
+                self.users.append(user)
+                if len(self.users) == 1:
+                    return "not a diff"
+                return "<<<<<<< SEARCH\n    return []\n=======\n    return [0]\n>>>>>>> REPLACE"
+
+        class FailThenPass:
+            calls = 0
+
+            def evaluate(self, path):
+                self.calls += 1
+                if self.calls == 1:
+                    return Evaluation(status="failed", feedback="short failure",
+                                      output_path=str(raw_output))
+                return Evaluation(status="ok", score=1.0)
+
+        config = load_config(PROJECT_ROOT / "config.yaml", "tsp")
+        config.debug_attempts = 2
+        temp = PROJECT_ROOT / "runs" / f"test_{uuid.uuid4().hex}"
+        temp.mkdir(parents=True)
+        try:
+            config.output_dir = temp
+            raw_output = temp / "evaluation.txt"
+            raw_output.write_text("full evaluator traceback marker", encoding="utf-8")
+            path = temp / "solution.py"
+            path.write_text("def solve(instance):\n    return []\n", encoding="utf-8")
+            model, evaluator = RevisionModel(), FailThenPass()
+            result = CodingAgent(config, model, evaluator).debug(
+                Idea("Route", "Test", "Order", "Shorter"), None, path)
+            self.assertEqual(result.status, "ok")
+            self.assertEqual(evaluator.calls, 2)
+            self.assertIn("full evaluator traceback marker", model.users[0])
+            self.assertIn("Invalid debugging response", model.users[1])
+            self.assertIn("return [0]", path.read_text(encoding="utf-8"))
+            self.assertEqual(len(list((temp / "details").glob("*_debug_*.txt"))), 2)
+        finally:
+            shutil.rmtree(temp)
+
     def test_agent_prompts_are_external_and_renderable(self):
         for stage in ("literature_review", "idea_generation", "code_generation",
                       "code_debugging", "experiment_reflection", "experiment_summary",
@@ -469,6 +546,10 @@ class WorkflowTests(unittest.TestCase):
         source = "def solve(instance):\n    return []\n"
         diff = "<<<<<<< SEARCH\n    return []\n=======\n    return [0]\n>>>>>>> REPLACE"
         self.assertIn("return [0]", update_code(source, diff))
+        self.assertEqual(parse_code("Explanation first.\n```python\ndef solve(instance):\n    return []\n```"),
+                         source)
+        spaced = "def solve(instance):\n    return []   \n"
+        self.assertIn("return [0]", update_code(spaced, diff))
 
     def test_experiment_restores_best_version_after_failed_revision(self):
         class BadRevisionModel:

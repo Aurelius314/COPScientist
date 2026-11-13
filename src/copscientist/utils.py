@@ -437,7 +437,10 @@ def parse_json(text: str) -> dict:
 
 def parse_code(text: str) -> str:
     text = text.strip()
-    if text.startswith("```"):
+    fenced = re.search(r"```python\s*\n(.*?)```", text, flags=re.IGNORECASE | re.DOTALL)
+    if fenced:
+        text = fenced.group(1).strip()
+    elif text.startswith("```"):
         text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
     compile(text, "solution.py", "exec")
     return text + "\n"
@@ -457,9 +460,21 @@ def update_code(code: str, response: str) -> str:
             raise ValueError("Malformed SEARCH/REPLACE block")
         old, remainder = block.split("\n=======\n", 1)
         new = remainder.split("\n>>>>>>> REPLACE", 1)[0]
-        if not old or updated.count(old) != 1:
+        if not old:
+            raise ValueError("SEARCH text cannot be empty")
+        if updated.count(old) == 1:
+            updated = updated.replace(old, new, 1)
+            continue
+        search_lines = [line.rstrip() for line in old.split("\n")]
+        code_lines = updated.split("\n")
+        matches = [index for index in range(len(code_lines) - len(search_lines) + 1)
+                   if [line.rstrip() for line in code_lines[index:index + len(search_lines)]]
+                   == search_lines]
+        if len(matches) != 1:
             raise ValueError("SEARCH text must match exactly once")
-        updated = updated.replace(old, new, 1)
+        index = matches[0]
+        updated = "\n".join(code_lines[:index] + new.split("\n")
+                            + code_lines[index + len(search_lines):])
     compile(updated, "solution.py", "exec")
     return updated.rstrip() + "\n"
 

@@ -74,6 +74,15 @@ python src/copscientist/evaluator.py heuristic bpp_online
 
 Outputs are saved under `runs/evaluator_test/<problem>/`.
 
+To exercise the Coding Agent's full seed → generate → evaluate → debug path without an API key, use its deterministic offline test. Omit `--offline` to use the configured model, and pass `--idea` to change the child idea.
+
+```powershell
+python src/copscientist/coding_agent.py --offline
+python src/copscientist/coding_agent.py --offline --problem tsp
+```
+
+Coding Agent test artifacts are saved under `runs/coding_agent_test/<problem>/`.
+
 ```powershell
 $env:PYTHONPATH = "$PWD/src"
 python -m unittest discover -s tests -v
