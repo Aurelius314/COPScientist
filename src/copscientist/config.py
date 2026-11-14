@@ -59,6 +59,8 @@ class Config:
     api_key_env: str = "OPENAI_API_KEY"
     search_max_queries: int = 5
     search_max_pages: int = 6
+    search_idea_max_queries: int = 2
+    search_idea_max_pages: int = 2
     role_models: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     @property
@@ -203,6 +205,8 @@ def load_config(path: Path | None = None, problem_name: str | None = None,
         api_key_env=str(llm.get("api_key_env", "OPENAI_API_KEY")),
         search_max_queries=int(search.get("max_queries", 5)),
         search_max_pages=int(search.get("max_pages", 6)),
+        search_idea_max_queries=int(search.get("idea_max_queries", 2)),
+        search_idea_max_pages=int(search.get("idea_max_pages", 2)),
         role_models=dict(llm.get("roles") or {}),
     )
     if config.rounds < 0 or config.debug_attempts < 0:
@@ -223,6 +227,7 @@ def load_config(path: Path | None = None, problem_name: str | None = None,
                                     config.evaluation_repeats,
                                     config.timeout_seconds, config.search_results,
                                     config.search_max_queries, config.search_max_pages,
+                                    config.search_idea_max_queries, config.search_idea_max_pages,
                                     config.min_experiment_repeats,
                                     config.max_experiment_repeats_cap,
                                     config.summarization_interval)):

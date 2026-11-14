@@ -1,20 +1,22 @@
 ## Problem Context
 {problem_description}
 
-## Function to Improve
-Name: `{function_to_evolve}`. Goal: {obj_type} the evaluation score.
+## Function to Evolve
+Name of the function to optimize: `{function_to_evolve}`.
+The goal is to {obj_type} the `score` of its evaluation result.
 
 ## Function Requirements
 {function_description}
 
 ## Parent Solution
+Below is the solution you can learn from:
 {parent_solutions}
 
 ## Long-term Research Reflection
 {long_term_reflection}
 
-## Prior Memory and Literature Review
+## Prior Memory and Research Evidence
 {research_context}
 
 ## Task
-Generate {num_ideas} specific, actionable idea in this response. Return a fenced JSON object with one "idea" field in the required format.
+Based on the parent solution, long-term reflection (if available), and research evidence (if available), generate one innovative and actionable idea for improving `{function_to_evolve}`. The idea must be self-contained enough for separate development and evaluation. Return the JSON object with one structured "idea" field specified in the system prompt.

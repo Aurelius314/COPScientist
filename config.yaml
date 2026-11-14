@@ -44,6 +44,8 @@ search:
   required: false
   max_queries: 5
   max_pages: 6
+  idea_max_queries: 2  # Optional searches for the selected parent in each ideation call
+  idea_max_pages: 2
 
 evolution:
   enabled: false

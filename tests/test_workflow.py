@@ -158,6 +158,120 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(agent.total_responses, 0)
         self.assertEqual(agent.valid_responses, 0)
 
+    def test_ideation_searches_current_failure_mode_before_generating_ideas(self):
+        class DecisionModel:
+            def __init__(self):
+                self.users = []
+
+            def complete(self, system, user):
+                self.users.append(user)
+                if "NEW external evidence" in system:
+                    return json.dumps({"search": True, "failure_mode": "Repeated long closing edge",
+                                       "queries": [{"kind": "web", "query": "TSP closing edge repair"},
+                                                   {"kind": "web", "query": "TSP closing edge repair"},
+                                                   {"kind": "web", "query": "discarded extra query"}]})
+                return json.dumps({"claims": [{"claim": "Repair the closing edge",
+                                                "source_urls": ["https://example.org/repair"]}],
+                                   "transferable_methods": [], "limitations": [],
+                                   "sufficient": True, "follow_up_queries": []})
+
+        class IdeaModel:
+            user = ""
+
+            def complete(self, system, user):
+                self.user = user
+                return json.dumps([{"title": "Closing-edge repair",
+                                    "rationale": "Parent has a long closing edge",
+                                    "algorithm": "Repair the tour after construction",
+                                    "expected_effect": "Reduce tour length",
+                                    "sources": ["https://example.org/repair",
+                                                "https://invented.example/claim"]}])
+
+        class Search:
+            queries = []
+
+            def review(self, paper_queries, web_queries, limit, required):
+                self.queries.append((paper_queries, web_queries))
+                return [Source(title="Repair note", url="https://example.org/repair",
+                               kind="web", query=web_queries[0], abstract="Search snippet")], []
+
+            def read_sources(self, sources, max_pages=2):
+                sources[0].content = "The page describes a closing-edge repair."
+                sources[0].content_level = "page"
+                return []
+
+        config = load_config(PROJECT_ROOT / "config.yaml", "tsp")
+        config.search_enabled = True
+        config.search_idea_max_queries = 1
+        config.verbose = False
+        temp = PROJECT_ROOT / "runs" / f"test_{uuid.uuid4().hex}"
+        temp.mkdir(parents=True)
+        try:
+            config.output_dir = temp
+            parent = Solution(idea=Idea("Seed", "Baseline", "Tour", "Reference"),
+                              code="def solve(instance): return []\n",
+                              evaluation=Evaluation(status="ok", score=120.0,
+                                                    feedback="Long closing edge"),
+                              summary="Repeated long closing edge after construction")
+            search, decision, idea_model = Search(), DecisionModel(), IdeaModel()
+            agent = IdeationAgent(config, idea_model, search, decision)
+            ideas = agent.run(parent, [], 1, FlowGraph("min", root=parent))
+            self.assertEqual(search.queries, [([], ["TSP closing edge repair"])])
+            self.assertIn("Repeated long closing edge", decision.users[0])
+            self.assertIn("current_parent_review", idea_model.user)
+            self.assertIn("Repair the closing edge", idea_model.user)
+            self.assertEqual(ideas[0].sources, ["https://example.org/repair"])
+            files = list((temp / "ideation_surveys").glob("*.json"))
+            self.assertEqual(len(files), 1)
+            self.assertEqual(json.loads(files[0].read_text(encoding="utf-8"))["parent_id"],
+                             parent.id)
+        finally:
+            shutil.rmtree(temp)
+
+    def test_ideation_skips_local_search_when_parent_has_enough_evidence(self):
+        class DecisionModel:
+            def complete(self, system, user):
+                return json.dumps({"search": False, "failure_mode": "Already understood",
+                                   "queries": []})
+
+        class IdeaModel:
+            def complete(self, system, user):
+                return json.dumps([{"title": "Improve", "rationale": "Measured gap",
+                                    "algorithm": "Adjust the construction rule",
+                                    "expected_effect": "Lower score", "sources": []}])
+
+        class Search:
+            def review(self, *args):
+                raise AssertionError("Search should not run")
+
+        config = load_config(PROJECT_ROOT / "config.yaml", "tsp_constructive")
+        config.search_enabled = True
+        config.verbose = False
+        agent = IdeationAgent(config, IdeaModel(), Search(), DecisionModel())
+        parent = Solution(idea=Idea("Seed", "Baseline", "Rule", "Reference"),
+                          evaluation=Evaluation(status="ok", score=1.0))
+        ideas = agent.run(parent, [], 1, FlowGraph("min", root=parent))
+        self.assertEqual(len(ideas), 1)
+
+    def test_solver_ideation_prompt_preserves_feasibility_and_runtime_requirements(self):
+        class Model:
+            user = ""
+
+            def complete(self, system, user):
+                self.user = user
+                return json.dumps([{"title": "Feasible insertion", "rationale": "Tour gap",
+                                    "algorithm": "Construct then repair a valid tour",
+                                    "expected_effect": "Lower cost", "sources": []}])
+
+        config = load_config(PROJECT_ROOT / "config.yaml", "tsp")
+        config.verbose = False
+        model = Model()
+        agent = IdeationAgent(config, model, FakeSearch())
+        agent.run(None, [], 1, FlowGraph("min"))
+        self.assertIn("valid solution", model.user)
+        self.assertIn("runtime cost", model.user)
+        self.assertIn("Implement `solve`", model.user)
+
     def test_llm_client_provider_chat_retry_and_multi_chat(self):
         def response(content):
             return SimpleNamespace(choices=[SimpleNamespace(
@@ -536,14 +650,20 @@ class WorkflowTests(unittest.TestCase):
             config.output_dir = temp
             scientist = COPScientist(config, FakeModel(), FakeSearch())
             scientist.run()
+            survey_dir = temp / "ideation_surveys"
+            survey_dir.mkdir()
+            (survey_dir / "parent.json").write_text('{"focus":"closing edge"}',
+                                                    encoding="utf-8")
             checkpoint = scientist.save(f"test_{uuid.uuid4().hex}")
             first = json.loads((temp / "result.json").read_text(encoding="utf-8"))
             self.assertEqual(first["completed_rounds"], 1)
             self.assertEqual(len(first["root_pool"]), 2)
             self.assertTrue((checkpoint / "memory.sqlite3").is_file())
             self.assertTrue((checkpoint / "ideation_agent_state.json").is_file())
+            self.assertTrue((checkpoint / "ideation_surveys" / "parent.json").is_file())
             baseline_code = Path(first["solutions"][0]["code_path"])
             baseline_code.unlink()
+            (survey_dir / "parent.json").unlink()
             self.assertFalse(baseline_code.exists())
             resumed_config = Config.from_dict(json.loads((checkpoint / "config.json").read_text(encoding="utf-8")))
             resumed_config.rounds = 2
@@ -551,6 +671,7 @@ class WorkflowTests(unittest.TestCase):
             second = json.loads((temp / "result.json").read_text(encoding="utf-8"))
             self.assertEqual(second["completed_rounds"], 2)
             self.assertTrue(baseline_code.is_file())
+            self.assertTrue((survey_dir / "parent.json").is_file())
             self.assertEqual(len(second["solutions"]), 3)
             self.assertGreater(sum(second["usage"]["responses"].values()),
                                sum(first["usage"]["responses"].values()))
@@ -695,12 +816,16 @@ class WorkflowTests(unittest.TestCase):
             self.assertIn("example", render_prompt(f"user_{stage}_copscientist.txt", "example"))
         for mode in ("coordinated", "independent"):
             self.assertTrue(load_prompt(f"system_idea_{mode}_generation_copscientist.txt"))
-            user = load_prompt(f"user_idea_{mode}_generation_copscientist.txt")
-            self.assertIn("example", user.format(
-                problem_description="example", function_to_evolve="solve", obj_type="min",
-                function_description="signature", parent_solutions="parent",
-                current_research_flow_graph="tree", long_term_reflection="reflection",
-                research_context="memory", num_ideas=2))
+            for suffix in ("", "_solver"):
+                user = load_prompt(f"user_idea_{mode}_generation{suffix}_copscientist.txt")
+                self.assertIn("example", user.format(
+                    problem_description="example", function_to_evolve="solve", obj_type="min",
+                    function_description="signature", parent_solutions="parent",
+                    current_research_flow_graph="tree", long_term_reflection="reflection",
+                    research_context="memory", num_ideas=2))
+        self.assertTrue(load_prompt("system_ideation_search_decision_copscientist.txt"))
+        self.assertIn("example", render_prompt("user_ideation_search_decision_copscientist.txt",
+                                                "example"))
         with self.assertRaises(ValueError):
             load_prompt("../config.yaml")
 

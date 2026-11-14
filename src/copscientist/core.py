@@ -96,6 +96,9 @@ class COPScientist:
             literature = self.config.run_path / "literature_review.json"
             if literature.is_file():
                 shutil.copyfile(literature, stage / "literature_review.json")
+            contextual = self.config.run_path / "ideation_surveys"
+            if contextual.is_dir():
+                shutil.copytree(contextual, stage / "ideation_surveys")
             temporary_db = None
             if self.evolution is None:
                 temporary_db = ResearchDatabase(self.config.run_path / "memory.sqlite3")
@@ -134,6 +137,9 @@ class COPScientist:
         if (source / "literature_review.json").is_file():
             shutil.copyfile(source / "literature_review.json",
                             self.config.run_path / "literature_review.json")
+        if (source / "ideation_surveys").is_dir():
+            shutil.copytree(source / "ideation_surveys",
+                            self.config.run_path / "ideation_surveys", dirs_exist_ok=True)
         self.tree = FlowGraph(self.config.task.objective)
         for payload in state["solutions"]:
             payload["idea"] = Idea(**payload["idea"])
@@ -175,7 +181,8 @@ class COPScientist:
                 config, self._model_for("experiment_reflect"),
                 CountingEvaluator(evaluator, self.usage, "experiment"),
                 self._model_for("experiment_summarize"))
-            ideation = IdeationAgent(config, self._model_for("ideation"), self.search)
+            ideation = IdeationAgent(config, self._model_for("ideation"), self.search,
+                                    self._model_for("literature_review") if config.search_enabled else None)
             self.ideation = ideation
             coding = CodingAgent(config, self._model_for("coding"),
                                  CountingEvaluator(evaluator, self.usage, "coding"))
@@ -190,9 +197,7 @@ class COPScientist:
                     ideation.sources = [Source(**item) for item in review.get("sources", [])]
             else:
                 if config.search_enabled:
-                    ideation.model = self._model_for("literature_review")
                     sources, errors = ideation.prepare_review()
-                    ideation.model = self._model_for("ideation")
                 else:
                     sources, errors = [], []
                 self.evolution.record_sources(sources)

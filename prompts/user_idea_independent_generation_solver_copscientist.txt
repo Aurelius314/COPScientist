@@ -1,0 +1,20 @@
+## Problem Context
+{problem_description}
+
+## Solver Interface and Objective
+Implement `{function_to_evolve}` for one problem instance. The goal is to {obj_type} the evaluation score while returning a valid solution for every tested instance.
+
+## Solver Requirements
+{function_description}
+
+## Parent Solver
+{parent_solutions}
+
+## Long-term Research Reflection
+{long_term_reflection}
+
+## Prior Memory and Research Evidence
+{research_context}
+
+## Task
+Generate one specific solver idea that addresses a measured weakness of the parent. Explain the algorithmic change, how it keeps solutions feasible, its expected effect on the objective, and its runtime trade-off. Do not assume an external solver or optimality guarantee unless the task contract supports it. Return the JSON object with one structured "idea" field specified in the system prompt.

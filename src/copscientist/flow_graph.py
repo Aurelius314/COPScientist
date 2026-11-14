@@ -6,6 +6,7 @@ from .utils import Solution, better
 
 
 class FlowGraph:
+    """Solution tree."""
     def __init__(self, objective: str, root: Solution | None = None):
         self.objective = objective
         self.nodes: dict[str, Solution] = {}

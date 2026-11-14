@@ -1,23 +1,36 @@
 ## Problem Context
 {problem_description}
 
-## Function to Improve
-Name: `{function_to_evolve}`. Goal: {obj_type} the evaluation score.
+## Function to Evolve
+Name of the function to optimize: `{function_to_evolve}`.
+The goal is to {obj_type} the `score` of its evaluation result.
 
 ## Function Requirements
 {function_description}
 
-## Parent Solution
-{parent_solutions}
-
 ## Current Research Flow Graph
+Below is the current research flow graph:
 {current_research_flow_graph}
+
+## Parent Solution
+Below is the parent solution you are trying to expand:
+{parent_solutions}
 
 ## Long-term Research Reflection
 {long_term_reflection}
 
-## Prior Memory and Literature Review
+## Prior Memory and Research Evidence
 {research_context}
 
 ## Task
-Generate up to {num_ideas} specific, actionable ideas as a coordinated research plan. Explore different directions that are individually implementable and may complement one another. Return a fenced JSON array in the required format.
+Based on the parent solution, current research flow graph, long-term reflection (if available), and research evidence (if available), generate ideas for improving `{function_to_evolve}`.
+
+### Research Planning Approach
+Think like a research planner organizing a scientific investigation. Generate ideas that:
+- **Explore different research directions**: investigate different aspects of the problem; a detailed plan is preferred.
+- **Consider the research flow graph**: identify gaps and complement ongoing investigations.
+- **Can be complementary**: together they may form a comprehensive research plan.
+- **Are independently implementable**: each idea can be developed and tested separately.
+- **Address different improvement areas**: cover more than one potential solution strategy.
+
+You may generate up to {num_ideas} specific, actionable ideas. Return the JSON array of structured idea objects specified in the system prompt.

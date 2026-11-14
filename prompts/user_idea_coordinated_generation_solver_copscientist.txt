@@ -1,0 +1,23 @@
+## Problem Context
+{problem_description}
+
+## Solver Interface and Objective
+Implement `{function_to_evolve}` for one problem instance. The goal is to {obj_type} the evaluation score while returning a valid solution for every tested instance.
+
+## Solver Requirements
+{function_description}
+
+## Current Research Flow Graph
+{current_research_flow_graph}
+
+## Parent Solver
+{parent_solutions}
+
+## Long-term Research Reflection
+{long_term_reflection}
+
+## Prior Memory and Research Evidence
+{research_context}
+
+## Task
+Generate up to {num_ideas} distinct, implementable solver ideas. Use the parent metrics and failure reports to choose algorithmic changes: construction, search, neighborhood design, pruning, bounds, or feasible repair where relevant. For each idea, explain how it preserves the task's feasibility constraints, how it might change the measured objective, and its likely runtime cost. Do not assume an external solver, optimality guarantee, or problem property unless the task contract supports it. Each idea must be independently testable. Return the JSON array of structured idea objects specified in the system prompt.
