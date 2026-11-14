@@ -83,6 +83,15 @@ python src/copscientist/coding_agent.py --offline --problem tsp
 
 Coding Agent test artifacts are saved under `runs/coding_agent_test/<problem>/`.
 
+The Experiment Agent has a matching entry point. Its offline test makes a failing local revision and confirms that the best tested seed is restored. Omit `--offline` to use the configured reflection and summary models.
+
+```powershell
+python src/copscientist/experiment_agent.py --offline
+python src/copscientist/experiment_agent.py --offline --problem tsp
+```
+
+Experiment artifacts are saved under `runs/experiment_agent_test/<problem>/`.
+
 ```powershell
 $env:PYTHONPATH = "$PWD/src"
 python -m unittest discover -s tests -v

@@ -20,7 +20,7 @@ run:
   elitist_experiment_factor: 2.0
   progressive_summarization: true
   summarization_interval: 4
-  compact_history_length: 0
+  compact_history_length: 2
   reflection_period: 0
   reflection_clearance_period: null
   reflection_compression: null

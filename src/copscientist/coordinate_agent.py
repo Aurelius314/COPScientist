@@ -116,14 +116,19 @@ class CoordinateAgent:
                             self.config.elitist_experiment_factor, is_elitist)
                     elif is_elitist:
                         repeats = int(repeats * self.config.elitist_experiment_factor)
-                    evaluation, history, reflection = self.experiment.run(
+                    evaluation, history, reflection, compact_summaries = self.experiment.run(
                         idea, path, evaluation, parent.evaluation.score,
-                        self.long_term_reflection, max_repeats=repeats)
+                        self.long_term_reflection, max_repeats=repeats, parent=parent)
+                    # OR-Agent gives an invalid post-experiment solution one final code repair.
+                    if evaluation.score is None:
+                        evaluation = self.coding.debug(
+                            idea, parent, path, evaluation, self.long_term_reflection)
                     solution.code_path = str(path)
                     solution.code = path.read_text(encoding="utf-8")
                     solution.evaluation = evaluation
                     solution.reflection = reflection
                     solution.intermediate = history
+                    solution.compact_summaries = compact_summaries
                     self.tree.add(solution)
                     if self.config.verbose:
                         print(f">>>[CoordinateAgent {self.number}] Solution {solution.id}: "

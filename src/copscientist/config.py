@@ -36,7 +36,7 @@ class Config:
     elitist_experiment_factor: float = 2.0
     progressive_summarization: bool = True
     summarization_interval: int = 4
-    compact_history_length: int = 0
+    compact_history_length: int = 2
     reflection_period: int = 0
     reflection_clearance_period: int | None = None
     reflection_compression: int | None = None
@@ -176,7 +176,7 @@ def load_config(path: Path | None = None, problem_name: str | None = None,
         elitist_experiment_factor=float(run.get("elitist_experiment_factor", 2)),
         progressive_summarization=bool(run.get("progressive_summarization", True)),
         summarization_interval=int(run.get("summarization_interval", 4)),
-        compact_history_length=int(run.get("compact_history_length", 0)),
+        compact_history_length=int(run.get("compact_history_length", 2)),
         reflection_period=int(run.get("reflection_period", 0)),
         reflection_clearance_period=(int(run["reflection_clearance_period"])
                                      if run.get("reflection_clearance_period") is not None else None),
@@ -208,6 +208,8 @@ def load_config(path: Path | None = None, problem_name: str | None = None,
     if (config.max_evolutions < 0 or config.autosave_interval_minutes < 0
             or config.compact_history_length < 0 or config.reflection_period < 0):
         raise ValueError("Evolution budget, autosave interval, and compact history length must be nonnegative")
+    if config.summarization_interval <= 0:
+        raise ValueError("Summarization interval must be positive")
     if config.reflection_clearance_period is not None and config.reflection_clearance_period <= 0:
         raise ValueError("Reflection clearance period must be positive")
     if config.reflection_compression is not None and config.reflection_compression <= 0:

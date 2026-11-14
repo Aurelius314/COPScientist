@@ -28,6 +28,16 @@ class FakeSearch:
         return [], []
 
 
+def experiment_reply(termination="yes", thinking="Measured result", diff=None, callbacks=None):
+    parts = [f"<thinking>{thinking}</thinking>"]
+    if diff is not None:
+        parts.append(f"```diff\n{diff}\n```")
+    if callbacks is not None:
+        parts.append(f"```python\n{callbacks}\n```")
+    parts.append(f'```json\n{{"termination": "{termination}"}}\n```')
+    return "\n".join(parts)
+
+
 class FakeModel:
     def __init__(self):
         self.coding_calls = 0
@@ -43,6 +53,8 @@ class FakeModel:
                 return "def solve(instance):\n    return []\n"
             return "def solve(instance):\n    return list(range(len(instance['coordinates'])))\n"
         if "Experiment Agent" in system:
+            if "final report" not in system.lower():
+                return experiment_reply(thinking="No justified local revision")
             return json.dumps({"diagnosis": "Feasible", "evidence": "Measured gap",
                                "next_step": "Try a better city ordering"})
         raise AssertionError(system)
@@ -57,12 +69,16 @@ class RevisionModel:
         if "Coding Agent" in system:
             return "def solve(instance):\n    return list(range(len(instance['coordinates'])))\n"
         if "Experiment Agent" in system and "Examine the latest measured result" in system:
-            return json.dumps({"action": "update_code", "reason": "Try nearest neighbor",
-                               "code": "def solve(instance):\n    coords = instance['coordinates']\n"
-                                       "    remaining = set(range(1, len(coords)))\n    tour = [0]\n"
-                                       "    while remaining:\n        x, y = coords[tour[-1]]\n"
-                                       "        nxt = min(remaining, key=lambda j: (coords[j][0]-x)**2 + (coords[j][1]-y)**2)\n"
-                                       "        tour.append(nxt)\n        remaining.remove(nxt)\n    return tour\n"})
+            if "remaining = set" in user:
+                return experiment_reply(thinking="The local change has been measured")
+            old = "def solve(instance):\n    return list(range(len(instance['coordinates'])))"
+            new = ("def solve(instance):\n    coords = instance['coordinates']\n"
+                   "    remaining = set(range(1, len(coords)))\n    tour = [0]\n"
+                   "    while remaining:\n        x, y = coords[tour[-1]]\n"
+                   "        nxt = min(remaining, key=lambda j: (coords[j][0]-x)**2 + (coords[j][1]-y)**2)\n"
+                   "        tour.append(nxt)\n        remaining.remove(nxt)\n    return tour")
+            return experiment_reply("no", "Try nearest neighbor",
+                                    f"<<<<<<< SEARCH\n{old}\n=======\n{new}\n>>>>>>> REPLACE")
         if "Experiment Agent" in system:
             return json.dumps({"diagnosis": "Measured", "evidence": "Tour length",
                                "next_step": "Continue from best"})
@@ -260,11 +276,13 @@ class WorkflowTests(unittest.TestCase):
         class CallbackModel:
             def complete(self, system, user):
                 if "Examine the latest measured result" in system:
-                    return json.dumps({"action": "update_callbacks", "reason": "Inspect one event",
-                                       "callbacks": "class Callbacks:\n"
-                                                    "    def on_step_end(self, step, metrics):\n"
-                                                    "        print('callback fired', step, metrics['cost'])\n",
-                                       "terminate_after_update": True})
+                    return experiment_reply(
+                        "yes", "Inspect one event",
+                        diff="<<<<<<< SEARCH\n    return []\n=======\n"
+                             "    return [0]\n>>>>>>> REPLACE",
+                        callbacks="class Callbacks:\n"
+                                  "    def on_step_end(self, step, metrics):\n"
+                                  "        print('callback fired', step, metrics['cost'])\n")
                 return json.dumps({"summary": "Callback observed the event."})
 
         name = f"callback_{uuid.uuid4().hex}"
@@ -295,12 +313,14 @@ class WorkflowTests(unittest.TestCase):
             agent = ExperimentAgent(config, CallbackModel())
             initial = agent.evaluate(code)
             self.assertEqual(initial.status, "ok")
-            best, history, summary = agent.run(
+            best, history, summary, compact = agent.run(
                 Idea("Inspect", "See event", "Callback", "Evidence"), code, initial, 2.0)
             self.assertEqual(best.score, 1.0)
             self.assertEqual(len(history), 2)
             self.assertIn("callback fired", history[-1]["evaluation"]["feedback"])
+            self.assertIn("return [0]", Path(history[-1]["code_path"]).read_text(encoding="utf-8"))
             self.assertEqual(summary, "Callback observed the event.")
+            self.assertEqual(compact, [])
         finally:
             self.assertTrue(problem.resolve().is_relative_to((PROJECT_ROOT / "problems").resolve()))
             shutil.rmtree(problem)
@@ -331,9 +351,10 @@ class WorkflowTests(unittest.TestCase):
         class Experiment:
             calls = 0
 
-            def run(self, idea, path, evaluation, parent_score, reflection, max_repeats=None):
+            def run(self, idea, path, evaluation, parent_score, reflection,
+                    max_repeats=None, parent=None):
                 self.calls += 1
-                return evaluation, [], "Measured result"
+                return evaluation, [], "Measured result", []
 
         class Memory:
             def retrieve(self, task):
@@ -364,6 +385,66 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(experiment.calls, 1)
             self.assertEqual(len(leaves), 1)
             self.assertEqual(len(tree.nodes), 2)
+        finally:
+            shutil.rmtree(temp)
+
+    def test_coordinate_debugs_invalid_solution_after_experiment(self):
+        class Ideas:
+            model = None
+
+            def propose(self, parent, memory, count, tree, reflection):
+                return [Idea("Route", "Test", "Order", "Shorter")]
+
+        class Coding:
+            calls = 0
+            debug_calls = 0
+
+            def run(self, idea, parent, path, reflection):
+                self.calls += 1
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("def solve(instance):\n    return []\n", encoding="utf-8")
+                return (Evaluation(status="ok", score=9.0) if self.calls == 1
+                        else Evaluation(status="failed"))
+
+            def debug(self, idea, parent, path, evaluation, reflection):
+                self.debug_calls += 1
+                path.write_text("def solve(instance):\n    return [0]\n", encoding="utf-8")
+                return Evaluation(status="ok", score=8.0)
+
+        class Experiment:
+            def run(self, idea, path, evaluation, parent_score, reflection,
+                    max_repeats=None, parent=None):
+                return evaluation, [], "", []
+
+        class Memory:
+            def retrieve(self, task):
+                return []
+
+            def record_solution(self, task, solution):
+                pass
+
+            def distill(self, task, solution, parent, objective):
+                pass
+
+        config = load_config(PROJECT_ROOT / "config.yaml", "tsp")
+        config.max_depth = 2
+        config.dynamic_experiment_allocation = False
+        config.verbose = False
+        temp = PROJECT_ROOT / "runs" / f"test_{uuid.uuid4().hex}"
+        temp.mkdir(parents=True)
+        try:
+            config.output_dir = temp
+            root = Solution(id="root", idea=Idea("Seed", "Seed", "Seed", "Seed"),
+                            code="def solve(instance):\n    return []\n",
+                            evaluation=Evaluation(status="ok", score=10.0))
+            tree = FlowGraph("min")
+            tree.add(root)
+            coding = Coding()
+            CoordinateAgent(0, config, Ideas(), coding, Experiment(), Memory(), tree).research_round(1, root)
+            self.assertEqual(coding.debug_calls, 1)
+            self.assertEqual(len(tree.nodes), 3)
+            self.assertTrue(any(node.depth == 2 and node.evaluation.score == 8.0
+                                for node in tree.nodes.values()))
         finally:
             shutil.rmtree(temp)
 
@@ -553,9 +634,18 @@ class WorkflowTests(unittest.TestCase):
 
     def test_experiment_restores_best_version_after_failed_revision(self):
         class BadRevisionModel:
+            def __init__(self):
+                self.reflections = 0
+
             def complete(self, system, user):
                 if "Examine the latest measured result" in system:
-                    return json.dumps({"action": "update_code", "code": "def solve(instance):\n    return []\n"})
+                    self.reflections += 1
+                    if self.reflections == 1:
+                        diff = ("<<<<<<< SEARCH\n"
+                                "    return list(range(len(instance['coordinates'])))\n"
+                                "=======\n    return []\n>>>>>>> REPLACE")
+                        return experiment_reply("no", "Try a local revision", diff)
+                    return experiment_reply(thinking="Revision is infeasible")
                 return json.dumps({"diagnosis": "Revision failed", "evidence": "Infeasible route",
                                    "next_step": "Use previous version"})
 
@@ -564,17 +654,147 @@ class WorkflowTests(unittest.TestCase):
         temp = PROJECT_ROOT / "runs" / f"test_{uuid.uuid4().hex}"
         temp.mkdir(parents=True)
         try:
+            config.output_dir = temp
             path = temp / "solution.py"
             original = "def solve(instance):\n    return list(range(len(instance['coordinates'])))\n"
             path.write_text(original, encoding="utf-8")
             agent = ExperimentAgent(config, BadRevisionModel())
             initial = Evaluation(status="ok", score=10.0)
-            result, history, _ = agent.run(
+            result, history, _, compact = agent.run(
                 Idea("Route", "Test", "Order", "Shorter"), path, initial, 12.0)
-            self.assertEqual(result.score, 10.0)
-            self.assertEqual(len(history), 3)
+            self.assertEqual(result.status, "ok")
+            self.assertEqual(len(history), 2)
             self.assertEqual(history[1]["evaluation"]["status"], "failed")
             self.assertEqual(path.read_text(encoding="utf-8"), original)
+            self.assertEqual(compact, [])
+        finally:
+            shutil.rmtree(temp)
+
+    def test_experiment_reflection_uses_parent_and_full_output(self):
+        class RecordingModel:
+            def __init__(self):
+                self.reflection_prompt = ""
+
+            def complete(self, system, user):
+                if "final report" in system.lower():
+                    return json.dumps({"summary": "No local change was justified."})
+                self.reflection_prompt = user
+                return experiment_reply(thinking="No measured gain")
+
+        class FixedEvaluator:
+            def evaluate(self, path, *, callbacks=None):
+                return Evaluation(status="ok", score=10.0, feedback="short",
+                                  output_path=str(output))
+
+        config = load_config(PROJECT_ROOT / "config.yaml", "tsp")
+        config.experiment_repeats = 1
+        config.verbose = False
+        temp = PROJECT_ROOT / "runs" / f"test_{uuid.uuid4().hex}"
+        temp.mkdir(parents=True)
+        try:
+            config.output_dir = temp
+            code = temp / "solution.py"
+            code.write_text("def solve(instance):\n    return []\n", encoding="utf-8")
+            output = temp / "eval_output.txt"
+            output.write_text("full diagnostic marker", encoding="utf-8")
+            parent = Solution(id="parent", idea=Idea("Baseline", "Test", "Tour", "Feasible"),
+                              code="def solve(instance):\n    return []\n", score=12.0,
+                              summary="Parent experiment insight")
+            model = RecordingModel()
+            result, history, summary, compact = ExperimentAgent(
+                config, model, FixedEvaluator()).run(
+                Idea("Child", "Test", "Revise", "Improve"), code,
+                Evaluation(status="ok", score=10.0, feedback="short",
+                           output_path=str(output)), 12.0, max_repeats=1, parent=parent)
+            self.assertEqual(result.score, 10.0)
+            self.assertEqual(len(history), 1)
+            self.assertEqual(summary, "No local change was justified.")
+            self.assertEqual(compact, [])
+            self.assertIn("full diagnostic marker", model.reflection_prompt)
+            self.assertIn("Parent experiment insight", model.reflection_prompt)
+        finally:
+            shutil.rmtree(temp)
+
+    def test_experiment_invalid_diff_is_recorded_before_next_reflection(self):
+        class InvalidDiffModel:
+            def __init__(self):
+                self.reflections = 0
+
+            def complete(self, system, user):
+                if "final report" in system.lower():
+                    return json.dumps({"summary": "The invalid patch was rejected."})
+                self.reflections += 1
+                if self.reflections == 1:
+                    return experiment_reply(
+                        "no", "Try patch",
+                        "<<<<<<< SEARCH\nmissing\n=======\nreplacement\n>>>>>>> REPLACE")
+                return experiment_reply(thinking="Patch did not apply")
+
+        class FixedEvaluator:
+            def evaluate(self, path, *, callbacks=None):
+                return Evaluation(status="ok", score=10.0)
+
+        config = load_config(PROJECT_ROOT / "config.yaml", "tsp")
+        config.verbose = False
+        temp = PROJECT_ROOT / "runs" / f"test_{uuid.uuid4().hex}"
+        temp.mkdir(parents=True)
+        try:
+            config.output_dir = temp
+            code = temp / "solution.py"
+            original = "def solve(instance):\n    return []\n"
+            code.write_text(original, encoding="utf-8")
+            model = InvalidDiffModel()
+            best, history, _, compact = ExperimentAgent(
+                config, model, FixedEvaluator()).run(
+                Idea("Route", "Test", "Order", "Shorter"), code,
+                Evaluation(status="ok", score=10.0), 12.0, max_repeats=2)
+            self.assertEqual(model.reflections, 2)
+            self.assertIn("must match exactly once", history[0]["revision_error"])
+            self.assertEqual(best.score, 10.0)
+            self.assertEqual(code.read_text(encoding="utf-8"), original)
+            self.assertEqual(compact, [])
+        finally:
+            shutil.rmtree(temp)
+
+    def test_experiment_reevaluates_and_compacts_history(self):
+        class ReflectionModel:
+            def __init__(self):
+                self.prompts = []
+
+            def complete(self, system, user):
+                if "final report" in system.lower():
+                    return json.dumps({"summary": "Four measurements were summarized."})
+                self.prompts.append(user)
+                return experiment_reply("no", "Keep measuring")
+
+        class FixedEvaluator:
+            calls = 0
+
+            def evaluate(self, path, *, callbacks=None):
+                self.calls += 1
+                return Evaluation(status="ok", score=float(self.calls))
+
+        config = load_config(PROJECT_ROOT / "config.yaml", "tsp")
+        config.verbose = False
+        config.summarization_interval = 2
+        config.compact_history_length = 1
+        temp = PROJECT_ROOT / "runs" / f"test_{uuid.uuid4().hex}"
+        temp.mkdir(parents=True)
+        try:
+            config.output_dir = temp
+            code = temp / "solution.py"
+            code.write_text("def solve(instance):\n    return []\n", encoding="utf-8")
+            model, evaluator = ReflectionModel(), FixedEvaluator()
+            best, history, summary, compact = ExperimentAgent(
+                config, model, evaluator).run(
+                    Idea("Route", "Test", "Order", "Shorter"), code,
+                    Evaluation(status="ok", score=-100.0), 12.0, max_repeats=4)
+            self.assertEqual(evaluator.calls, 4)
+            self.assertEqual(best.score, 1.0)
+            self.assertEqual(len(compact), 2)
+            self.assertEqual(len(history), 1)
+            self.assertIn("Four measurements", summary)
+            self.assertIn("progressive_summary", model.prompts[2])
         finally:
             shutil.rmtree(temp)
 
@@ -702,7 +922,7 @@ class WorkflowTests(unittest.TestCase):
             solutions = result["solutions"]
             self.assertEqual(len(solutions), 3)
             self.assertEqual(solutions[2]["parent_id"], solutions[1]["id"])
-            self.assertEqual(len(solutions[1]["intermediate"]), 3)
+            self.assertEqual(len(solutions[1]["intermediate"]), 2)
             round_tree = json.loads((temp / "details" / "coordinate_0_round_1_tree.json").read_text(encoding="utf-8"))
             self.assertEqual(len(round_tree["nodes"]), 2)
             self.assertIn(solutions[1]["id"], result["root_pool"])

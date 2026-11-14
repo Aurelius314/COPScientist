@@ -1,3 +1,3 @@
-Decide whether to make one targeted experimental revision or terminate. Return the requested JSON object.
+Reflect on the latest experiment. You may update code and callbacks together, then decide whether to terminate. Use the required thinking, optional fenced update blocks, and final termination JSON.
 
 {{context}}

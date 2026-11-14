@@ -435,6 +435,29 @@ def parse_json(text: str) -> dict:
     return value
 
 
+def extract_thinking(text: str) -> str | None:
+    match = re.search(r"<thinking>(.*?)</thinking>", text, flags=re.DOTALL)
+    return match.group(1).strip() if match else None
+
+
+def extract_diff_block(text: str) -> str | None:
+    match = re.search(r"```diff\s*\n(.*?)```", text, flags=re.IGNORECASE | re.DOTALL)
+    return match.group(1).rstrip() if match else None
+
+
+def extract_python_code(text: str) -> str | None:
+    match = re.search(r"```python\s*\n(.*?)```", text, flags=re.IGNORECASE | re.DOTALL)
+    return match.group(1).strip() if match else None
+
+
+def extract_json_block(text: str) -> dict | None:
+    match = re.search(r"```json\s*\n(.*?)```", text, flags=re.IGNORECASE | re.DOTALL)
+    try:
+        return parse_json(match.group(1) if match else text)
+    except (ValueError, IndexError):
+        return None
+
+
 def parse_code(text: str) -> str:
     text = text.strip()
     fenced = re.search(r"```python\s*\n(.*?)```", text, flags=re.IGNORECASE | re.DOTALL)
