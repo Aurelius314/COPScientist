@@ -38,6 +38,7 @@ class COPScientist:
         self.usage = Usage()
         self.progress: list[dict] = []
         self.coordinates: list[CoordinateAgent] = []
+        self.ideation: IdeationAgent | None = None
         self.evolution: EvolutionAgent | None = None
 
     def _log(self, message: str) -> None:
@@ -86,6 +87,9 @@ class COPScientist:
                      "coordinates": [agent.state_dict() for agent in self.coordinates]}
             (stage / "state.json").write_text(
                 json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+            if self.ideation is not None:
+                (stage / "ideation_agent_state.json").write_text(
+                    json.dumps(self.ideation.state_dict(), indent=4), encoding="utf-8")
             source = self.config.run_path / "solutions"
             if source.is_dir():
                 shutil.copytree(source, stage / "solutions")
@@ -172,9 +176,13 @@ class COPScientist:
                 CountingEvaluator(evaluator, self.usage, "experiment"),
                 self._model_for("experiment_summarize"))
             ideation = IdeationAgent(config, self._model_for("ideation"), self.search)
+            self.ideation = ideation
             coding = CodingAgent(config, self._model_for("coding"),
                                  CountingEvaluator(evaluator, self.usage, "coding"))
             if restored:
+                idea_state = self._checkpoint_path(self.checkpoint) / "ideation_agent_state.json"
+                if idea_state.is_file():
+                    ideation.load_state(json.loads(idea_state.read_text(encoding="utf-8")))
                 review_path = config.run_path / "literature_review.json"
                 if review_path.is_file():
                     review = json.loads(review_path.read_text(encoding="utf-8"))

@@ -435,6 +435,46 @@ def parse_json(text: str) -> dict:
     return value
 
 
+def extract_json(response: str) -> list | dict | None:
+    """Extract OR-Agent-style JSON arrays or objects from an LLM response."""
+    if not response:
+        return None
+    match = re.search(r"```json\s*(.*?)\s*```", response,
+                      flags=re.DOTALL | re.IGNORECASE)
+    candidate = match.group(1).strip() if match else response.strip()
+    try:
+        value = json.loads(candidate)
+    except json.JSONDecodeError:
+        # OR-Agent's repair pass escapes control characters inside JSON strings.
+        repaired = []
+        in_string = False
+        escaped = False
+        for char in candidate:
+            if in_string:
+                if escaped:
+                    repaired.append(char)
+                    escaped = False
+                elif char == "\\":
+                    repaired.append(char)
+                    escaped = True
+                elif char == '"':
+                    repaired.append(char)
+                    in_string = False
+                elif char in "\n\r\t":
+                    repaired.append({"\n": "\\n", "\r": "\\r", "\t": "\\t"}[char])
+                else:
+                    repaired.append(char)
+            else:
+                repaired.append(char)
+                if char == '"':
+                    in_string = True
+        try:
+            value = json.loads("".join(repaired))
+        except json.JSONDecodeError:
+            return None
+    return value if isinstance(value, (list, dict)) else None
+
+
 def extract_thinking(text: str) -> str | None:
     match = re.search(r"<thinking>(.*?)</thinking>", text, flags=re.DOTALL)
     return match.group(1).strip() if match else None

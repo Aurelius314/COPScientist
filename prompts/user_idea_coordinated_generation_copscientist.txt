@@ -1,0 +1,23 @@
+## Problem Context
+{problem_description}
+
+## Function to Improve
+Name: `{function_to_evolve}`. Goal: {obj_type} the evaluation score.
+
+## Function Requirements
+{function_description}
+
+## Parent Solution
+{parent_solutions}
+
+## Current Research Flow Graph
+{current_research_flow_graph}
+
+## Long-term Research Reflection
+{long_term_reflection}
+
+## Prior Memory and Literature Review
+{research_context}
+
+## Task
+Generate up to {num_ideas} specific, actionable ideas as a coordinated research plan. Explore different directions that are individually implementable and may complement one another. Return a fenced JSON array in the required format.

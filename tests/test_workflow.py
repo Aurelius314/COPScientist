@@ -16,9 +16,10 @@ from copscientist.coordinate_agent import CoordinateAgent
 from copscientist.core import COPScientist
 from copscientist.experiment_agent import ExperimentAgent
 from copscientist.flow_graph import FlowGraph
+from copscientist.ideation_agent import IdeationAgent
 from copscientist.search import LiteratureSearch
 from copscientist.utils import load_prompt, parse_code, render_prompt, update_code
-from copscientist.utils import Evaluation, Idea, LLMClient, Solution, Task, experiment_allocation
+from copscientist.utils import Evaluation, Idea, LLMClient, Solution, Source, Task, experiment_allocation
 from copscientist.evaluator import (Evaluator, _average_metrics, _parse_eval_result,
                                     load_instance, validate)
 
@@ -44,9 +45,9 @@ class FakeModel:
 
     def complete(self, system, user):
         if "Ideation Agent" in system:
-            return json.dumps({"ideas": [{"title": "Nearest neighbor", "rationale": "Local distance",
-                                          "algorithm": "Choose the closest unvisited city",
-                                          "expected_effect": "Comparable baseline", "sources": []}]})
+            return json.dumps([{"title": "Nearest neighbor", "rationale": "Local distance",
+                                "algorithm": "Choose the closest unvisited city",
+                                "expected_effect": "Comparable baseline", "sources": []}])
         if "Coding Agent" in system:
             self.coding_calls += 1
             if self.coding_calls == 1:
@@ -63,9 +64,9 @@ class FakeModel:
 class RevisionModel:
     def complete(self, system, user):
         if "Ideation Agent" in system:
-            return json.dumps({"ideas": [{"title": "Local route", "rationale": "Short edges",
-                                          "algorithm": "Try nearest neighbor", "expected_effect": "Shorter tour",
-                                          "sources": []}]})
+            return json.dumps([{"title": "Local route", "rationale": "Short edges",
+                                "algorithm": "Try nearest neighbor", "expected_effect": "Shorter tour",
+                                "sources": []}])
         if "Coding Agent" in system:
             return "def solve(instance):\n    return list(range(len(instance['coordinates'])))\n"
         if "Experiment Agent" in system and "Examine the latest measured result" in system:
@@ -86,6 +87,71 @@ class RevisionModel:
 
 
 class WorkflowTests(unittest.TestCase):
+    def test_ideation_coordinated_generation_retries_and_counts_responses(self):
+        class Model:
+            def __init__(self):
+                self.calls = []
+
+            def complete(self, system, user):
+                self.calls.append((system, user))
+                if len(self.calls) == 1:
+                    return "invalid JSON"
+                return json.dumps([{"title": "Change insertion", "rationale": "Measured gap",
+                                    "algorithm": "Insert the cheapest next node",
+                                    "expected_effect": "Lower cost", "sources": ["https://known", "https://unknown"]},
+                                   {"title": "Local search", "rationale": "Long edges",
+                                    "algorithm": "Apply 2-opt", "expected_effect": "Lower cost",
+                                    "sources": []}])
+
+        config = load_config(PROJECT_ROOT / "config.yaml", "tsp")
+        config.verbose = False
+        model = Model()
+        agent = IdeationAgent(config, model, FakeSearch())
+        agent.sources = [Source(url="https://known", title="Paper", kind="literature",
+                                query="search")]
+        parent = Solution(idea=Idea("Seed", "Baseline", "Original", "Reference"),
+                          code="def solve(instance): return []\n",
+                          evaluation=Evaluation(status="ok", score=10.0))
+        ideas = agent.run(parent, [{"insight": "try cheaper edges"}], 2,
+                          FlowGraph("min", root=parent), "Keep feasible tours")
+        self.assertEqual(len(ideas), 2)
+        self.assertEqual(ideas[0].sources, ["https://known"])
+        self.assertEqual(agent.state_dict(), {"total_responses": 2, "function_evals": 0,
+                                               "valid_responses": 1})
+        self.assertIn("Keep feasible tours", model.calls[0][1])
+        self.assertIn("try cheaper edges", model.calls[0][1])
+        self.assertIn("Current Research Flow Graph", model.calls[0][1])
+        self.assertIn("coordinated", (model.calls[0][0] + model.calls[0][1]).lower())
+
+    def test_ideation_independent_generation_retries_each_idea(self):
+        class Model:
+            def __init__(self):
+                self.calls = []
+
+            def complete(self, system, user):
+                self.calls.append((system, user))
+                if len(self.calls) == 1:
+                    return "not JSON"
+                item = {"title": f"Idea {len(self.calls)}", "rationale": "Observed issue",
+                        "algorithm": "Try one local change", "expected_effect": "Better score",
+                        "sources": []}
+                return json.dumps({"idea": item})
+
+        config = load_config(PROJECT_ROOT / "config.yaml", "tsp")
+        config.verbose = False
+        config.ideas_coordinated_generation_disabled = True
+        model = Model()
+        agent = IdeationAgent(config, model, FakeSearch())
+        ideas = agent.run(None, [], 2, FlowGraph("min"))
+        self.assertEqual([idea.title for idea in ideas], ["Idea 2", "Idea 3"])
+        self.assertEqual(agent.total_responses, 3)
+        self.assertEqual(agent.valid_responses, 2)
+        self.assertEqual(model.calls[0][1], model.calls[1][1])
+        self.assertIn("independent", model.calls[0][0].lower())
+        agent.reset()
+        self.assertEqual(agent.total_responses, 0)
+        self.assertEqual(agent.valid_responses, 0)
+
     def test_llm_client_provider_chat_retry_and_multi_chat(self):
         def response(content):
             return SimpleNamespace(choices=[SimpleNamespace(
@@ -335,7 +401,7 @@ class WorkflowTests(unittest.TestCase):
         class Ideas:
             model = None
 
-            def propose(self, parent, memory, count, tree, reflection):
+            def run(self, parent, memory, count, tree, reflection):
                 return [Idea("Route", "Test", "Order", "Shorter")]
 
         class Coding:
@@ -392,7 +458,7 @@ class WorkflowTests(unittest.TestCase):
         class Ideas:
             model = None
 
-            def propose(self, parent, memory, count, tree, reflection):
+            def run(self, parent, memory, count, tree, reflection):
                 return [Idea("Route", "Test", "Order", "Shorter")]
 
         class Coding:
@@ -469,6 +535,7 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(first["completed_rounds"], 1)
             self.assertEqual(len(first["root_pool"]), 2)
             self.assertTrue((checkpoint / "memory.sqlite3").is_file())
+            self.assertTrue((checkpoint / "ideation_agent_state.json").is_file())
             baseline_code = Path(first["solutions"][0]["code_path"])
             baseline_code.unlink()
             self.assertFalse(baseline_code.exists())
@@ -615,11 +682,19 @@ class WorkflowTests(unittest.TestCase):
             shutil.rmtree(temp)
 
     def test_agent_prompts_are_external_and_renderable(self):
-        for stage in ("literature_review", "idea_generation", "code_generation",
+        for stage in ("literature_review", "code_generation",
                       "code_debugging", "experiment_reflection", "experiment_summary",
                       "long_term_reflection"):
             self.assertTrue(load_prompt(f"system_{stage}_copscientist.txt"))
             self.assertIn("example", render_prompt(f"user_{stage}_copscientist.txt", "example"))
+        for mode in ("coordinated", "independent"):
+            self.assertTrue(load_prompt(f"system_idea_{mode}_generation_copscientist.txt"))
+            user = load_prompt(f"user_idea_{mode}_generation_copscientist.txt")
+            self.assertIn("example", user.format(
+                problem_description="example", function_to_evolve="solve", obj_type="min",
+                function_description="signature", parent_solutions="parent",
+                current_research_flow_graph="tree", long_term_reflection="reflection",
+                research_context="memory", num_ideas=2))
         with self.assertRaises(ValueError):
             load_prompt("../config.yaml")
 

@@ -83,8 +83,8 @@ class CoordinateAgent:
             for _ in range(attempts):
                 memories = (self.evolution.retrieve(self.config.task.name)
                             if self.config.evolution_enabled else [])
-                ideas = self.ideation.propose(parent, memories, self.config.ideas_per_round,
-                                              self.flow_graph, self.long_term_reflection)
+                ideas = self.ideation.run(parent, memories, self.config.ideas_per_round,
+                                          self.flow_graph, self.long_term_reflection)
                 for idea in ideas:
                     solution_count += 1
                     identifier = uuid.uuid4().hex[:12]
