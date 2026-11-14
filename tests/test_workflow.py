@@ -44,6 +44,11 @@ class FakeModel:
         self.coding_calls = 0
 
     def complete(self, system, user):
+        if "research survey assistant" in system:
+            return json.dumps({"claims": [{"claim": "Use measured local costs",
+                                            "source_urls": ["https://example.org/paper"]}],
+                               "transferable_methods": [], "limitations": [],
+                               "sufficient": True, "follow_up_queries": []})
         if "Ideation Agent" in system:
             return json.dumps([{"title": "Nearest neighbor", "rationale": "Local distance",
                                 "algorithm": "Choose the closest unvisited city",
@@ -108,7 +113,8 @@ class WorkflowTests(unittest.TestCase):
         model = Model()
         agent = IdeationAgent(config, model, FakeSearch())
         agent.sources = [Source(url="https://known", title="Paper", kind="literature",
-                                query="search")]
+                                query="search", abstract="Measured result",
+                                content_level="abstract")]
         parent = Solution(idea=Idea("Seed", "Baseline", "Original", "Reference"),
                           code="def solve(instance): return []\n",
                           evaluation=Evaluation(status="ok", score=10.0))
@@ -883,24 +889,162 @@ class WorkflowTests(unittest.TestCase):
 
     def test_literature_search_preserves_provenance(self):
         def fetch(url, headers=None):
-            if "crossref" in url:
-                return {"message": {"items": [{"title": ["A scheduling paper"], "DOI": "10.1/a",
-                                                "published": {"date-parts": [[2020]]}}]}}
-            return {"web": {"results": [{"title": "Routing guide", "url": "https://example.org/route"}]}}
-        search = LiteratureSearch(fetch=fetch)
-        import os
-        previous = os.environ.get("BRAVE_SEARCH_API_KEY")
-        os.environ["BRAVE_SEARCH_API_KEY"] = "test"
-        try:
+            return {"message": {"items": [{"title": ["A scheduling paper"], "DOI": "10.1/a",
+                                            "published": {"date-parts": [[2020]]}}]}}
+
+        def post(url, payload):
+            return {"results": [{"title": "Routing guide", "url": "https://example.org/route"}]}
+
+        search = LiteratureSearch(fetch=fetch, post=post)
+        with patch.dict("os.environ", {"TAVILY_API_KEY": "test"}):
             sources, errors = search.review(["scheduling"], ["routing"], 2, True)
-        finally:
-            if previous is None:
-                del os.environ["BRAVE_SEARCH_API_KEY"]
-            else:
-                os.environ["BRAVE_SEARCH_API_KEY"] = previous
         self.assertEqual(errors, [])
         self.assertEqual({s.kind for s in sources}, {"paper", "web"})
         self.assertEqual(sources[0].url, "https://doi.org/10.1/a")
+
+    def test_tavily_search_reads_only_bounded_source_pages(self):
+        requests = []
+        pages = []
+
+        def post(url, payload):
+            requests.append((url, payload))
+            return {"results": [{"title": "Algorithm note", "url": "https://example.org/a",
+                                 "content": "Search excerpt"},
+                                {"title": "Another note", "url": "https://example.org/b",
+                                 "content": "Another excerpt"}]}
+
+        def fetch_page(url, max_chars=8000):
+            pages.append(url)
+            return "Full page explains the algorithm and its assumptions."
+
+        with patch.dict("os.environ", {"TAVILY_API_KEY": "test-key"}):
+            search = LiteratureSearch(post=post, fetch_page=fetch_page)
+            sources = search.web("routing heuristic", 2)
+        self.assertEqual(requests[0][0], "https://api.tavily.com/search")
+        self.assertEqual(requests[0][1]["query"], "routing heuristic")
+        self.assertEqual(sources[0].content_level, "snippet")
+        self.assertEqual(search.read_sources(sources, max_pages=1), [])
+        self.assertEqual(pages, ["https://example.org/a"])
+        self.assertEqual(sources[0].content_level, "page")
+        self.assertEqual(sources[1].content_level, "snippet")
+
+    def test_webpage_reader_extracts_text_and_drops_scripts(self):
+        from email.message import Message
+        from io import BytesIO
+        from copscientist.search import _get_page
+
+        class Response(BytesIO):
+            def __init__(self):
+                super().__init__(b"<html><h1>Route method</h1><script>ignore me</script>"
+                                 b"<p>Try the nearest feasible node.</p></html>")
+                self.headers = Message()
+                self.headers["Content-Type"] = "text/html; charset=utf-8"
+
+        with patch("copscientist.search.urlopen", return_value=Response()):
+            content = _get_page("https://example.org/method", max_chars=100)
+        self.assertIn("Route method", content)
+        self.assertIn("nearest feasible node", content)
+        self.assertNotIn("ignore me", content)
+
+    def test_optional_survey_synthesis_failure_keeps_basic_ideation_available(self):
+        class Search:
+            def review(self, paper_queries, web_queries, limit, required):
+                return [Source(title="Paper", url="https://example.org/paper", kind="paper",
+                               query="method", abstract="A method abstract")], []
+
+        class Model:
+            def complete(self, system, user):
+                return "not JSON"
+
+        config = load_config(PROJECT_ROOT / "config.yaml", "tsp")
+        config.verbose = False
+        agent = IdeationAgent(config, Model(), Search())
+        sources, errors = agent.prepare_review()
+        self.assertEqual(len(sources), 1)
+        self.assertEqual(agent.review["claims"], [])
+        self.assertIn("Survey synthesis failed", errors[0])
+
+    def test_enabled_survey_is_saved_before_research_rounds(self):
+        class Search:
+            def review(self, paper_queries, web_queries, limit, required):
+                return [Source(title="Relevant paper", url="https://example.org/paper",
+                               kind="paper", query="route", abstract="Measured local costs")], []
+
+            def read_sources(self, sources, max_pages=6):
+                return []
+
+        config = load_config(PROJECT_ROOT / "config.yaml", "tsp")
+        config.task.instances = ["tsplib_euc_2d/eil51.tsp.gz"]
+        config.task.validation_instances = ["tsplib_euc_2d/eil76.tsp.gz"]
+        config.rounds = 0
+        config.search_enabled = True
+        config.verbose = False
+        temp = PROJECT_ROOT / "runs" / f"test_{uuid.uuid4().hex}"
+        temp.mkdir(parents=True)
+        try:
+            config.output_dir = temp
+            COPScientist(config, FakeModel(), Search()).run()
+            survey = json.loads((temp / "literature_review.json").read_text(encoding="utf-8"))
+            self.assertEqual(survey["review"]["claims"][0]["source_urls"],
+                             ["https://example.org/paper"])
+            self.assertEqual(survey["sources"][0]["content_level"], "abstract")
+        finally:
+            shutil.rmtree(temp)
+
+    def test_survey_refines_one_query_and_keeps_only_readable_citations(self):
+        class Search:
+            def __init__(self):
+                self.queries = []
+
+            def review(self, paper_queries, web_queries, limit, required):
+                self.queries.append((paper_queries, web_queries))
+                query = (paper_queries or web_queries)[0]
+                return [Source(title=query, url=f"https://example.org/{len(self.queries)}",
+                               kind="paper" if paper_queries else "web", query=query,
+                               abstract="A concrete method" if paper_queries else "Snippet",
+                               content_level="abstract" if paper_queries else "snippet")], []
+
+            def read_sources(self, sources, max_pages=6):
+                for source in sources[:max_pages]:
+                    if source.kind == "web":
+                        source.content = "The page explains a concrete solver mechanism."
+                        source.content_level = "page"
+                return []
+
+        class SurveyModel:
+            def __init__(self):
+                self.calls = []
+
+            def complete(self, system, user):
+                self.calls.append(user)
+                if len(self.calls) == 1:
+                    return json.dumps({"claims": [{"claim": "Supported", "source_urls":
+                                                    ["https://example.org/1"]}],
+                                       "transferable_methods": [], "limitations": [],
+                                       "sufficient": False,
+                                       "follow_up_queries": [{"kind": "web", "query": "specific solver mechanism"},
+                                                             {"kind": "web", "query": "extra query"}]})
+                return json.dumps({"claims": [{"claim": "Grounded in page", "source_urls":
+                                                ["https://example.org/2"]},
+                                               {"claim": "Unverified", "source_urls":
+                                                ["https://invented.example/none"]}],
+                                   "transferable_methods": [], "limitations": [], "sufficient": True,
+                                   "follow_up_queries": []})
+
+        config = load_config(PROJECT_ROOT / "config.yaml", "tsp")
+        config.verbose = False
+        config.search_max_queries = 4
+        search, model = Search(), SurveyModel()
+        agent = IdeationAgent(config, model, search)
+        sources, errors = agent.prepare_review()
+        self.assertEqual(errors, [])
+        self.assertEqual(len(search.queries), 2)
+        self.assertEqual(search.queries[1], ([], ["specific solver mechanism"]))
+        self.assertEqual(len(model.calls), 2)
+        self.assertEqual(len(sources), 2)
+        self.assertEqual(agent.review["claims"],
+                         [{"claim": "Grounded in page", "source_urls": ["https://example.org/2"]}])
+        self.assertEqual(len(agent.review["searches"]), 4)
 
     def test_full_research_round_persists_tree_and_memory(self):
         config = load_config(PROJECT_ROOT / "config.yaml", "tsp")

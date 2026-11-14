@@ -42,7 +42,8 @@ search:
     - cross domain combinatorial optimization heuristics
   results_per_query: 3
   required: false
-  brave_key_env: BRAVE_SEARCH_API_KEY
+  max_queries: 5
+  max_pages: 6
 
 evolution:
   enabled: false

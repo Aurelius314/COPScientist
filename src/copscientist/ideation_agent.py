@@ -112,29 +112,95 @@ class IdeationAgent:
 
     # survey: web search with literature review.
     def prepare_review(self) -> tuple[list[Source], list[str]]:
+        # EvoScientist-style broad search, source reading, reflection, and one narrow follow-up.
+        query_budget = self.config.search_max_queries
+        broad_papers = [f"{self.config.task.name} combinatorial optimization algorithm",
+                        *self.config.literature_queries][:min(2, query_budget)]
+        broad_web = [f"{self.config.task.name} heuristic solver implementation",
+                     *self.config.web_queries][:min(1, query_budget - len(broad_papers))]
+        searched = [{"kind": "paper", "query": query} for query in broad_papers]
+        searched += [{"kind": "web", "query": query} for query in broad_web]
         self.sources, errors = self.search.review(
-            [f"{self.config.task.name} combinatorial optimization algorithm",
-             *self.config.literature_queries],
-            [f"{self.config.task.name} heuristic solver implementation",
-             *self.config.web_queries],
-            self.config.search_results, self.config.search_required,
-        )
-        payload = [{**asdict(source), "abstract": source.abstract[:500]}
-                   for source in self.sources[:20]]
-        if payload:
-            raw_review = parse_json(self.model.complete(
-                load_prompt("system_literature_review_copscientist.txt"),
-                render_prompt("user_literature_review_copscientist.txt",
-                              json.dumps(payload, ensure_ascii=False)),
-            ))
-            allowed = {source.url for source in self.sources}
-            self.review = {
-                "claims": _grounded(raw_review.get("claims"), "claim", allowed),
-                "transferable_methods": _grounded(raw_review.get("transferable_methods"), "method", allowed),
-                "limitations": raw_review.get("limitations", []),
-            }
-        else:
-            self.review = {"claims": [], "transferable_methods": [], "limitations": errors}
+            broad_papers, broad_web, self.config.search_results,
+            self.config.search_required)
+        reader = getattr(self.search, "read_sources", None)
+        if reader:
+            errors.extend(reader(self.sources, max_pages=self.config.search_max_pages))
+
+        def summarize_sources() -> dict:
+            readable = {source.url for source in self.sources
+                        if source.content or source.content_level == "abstract"}
+            if self.config.search_required and not readable:
+                raise RuntimeError("Search required but no source text could be read")
+            if not self.sources:
+                return {"claims": [], "transferable_methods": [],
+                        "limitations": errors, "searches": searched}
+            payload = [{**asdict(source), "abstract": source.abstract[:800],
+                        "content": source.content[:5000]}
+                       for source in self.sources[:20]]
+            try:
+                response = self.model.complete(
+                    load_prompt("system_literature_review_copscientist.txt"),
+                    render_prompt("user_literature_review_copscientist.txt",
+                                  json.dumps({"task": self.config.task.description,
+                                              "sources": payload, "searches": searched,
+                                              "search_errors": errors},
+                                             ensure_ascii=False)))
+                self.total_responses += 1
+                raw = parse_json(response)
+            except (ValueError, RuntimeError, OSError) as exc:
+                if self.config.search_required:
+                    raise
+                errors.append(f"Survey synthesis failed: {exc}")
+                return {"claims": [], "transferable_methods": [],
+                        "limitations": errors, "searches": searched}
+            return {"claims": _grounded(raw.get("claims"), "claim", readable),
+                    "transferable_methods": _grounded(raw.get("transferable_methods"),
+                                                       "method", readable),
+                    "limitations": [*(raw.get("limitations")
+                                       if isinstance(raw.get("limitations"), list) else []),
+                                    *errors],
+                    "follow_up_queries": raw.get("follow_up_queries", []),
+                    "sufficient": raw.get("sufficient", True),
+                    "searches": searched}
+
+        survey = summarize_sources()
+        remaining = query_budget - len(searched)
+        if survey.get("sufficient") is False and remaining > 0:
+            follow_up = []
+            existing = {(item["kind"], item["query"].lower()) for item in searched}
+            for item in (survey.get("follow_up_queries")
+                         if isinstance(survey.get("follow_up_queries"), list) else []):
+                if not isinstance(item, dict):
+                    continue
+                kind, query = item.get("kind"), item.get("query")
+                if kind not in {"paper", "web"} or not isinstance(query, str):
+                    continue
+                query = query.strip()[:200]
+                if not query or (kind, query.lower()) in existing:
+                    continue
+                follow_up.append({"kind": kind, "query": query})
+                existing.add((kind, query.lower()))
+                if len(follow_up) >= remaining:
+                    break
+            if follow_up:
+                extra, extra_errors = self.search.review(
+                    [item["query"] for item in follow_up if item["kind"] == "paper"],
+                    [item["query"] for item in follow_up if item["kind"] == "web"],
+                    self.config.search_results, self.config.search_required)
+                errors.extend(extra_errors)
+                known = {source.url.lower() for source in self.sources}
+                new_sources = [source for source in extra if source.url.lower() not in known]
+                if reader:
+                    pages_left = max(0, self.config.search_max_pages -
+                                     min(len(self.sources), self.config.search_max_pages))
+                    errors.extend(reader(new_sources, max_pages=pages_left))
+                self.sources.extend(new_sources)
+                searched.extend(follow_up)
+                survey = summarize_sources()
+        survey.pop("follow_up_queries", None)
+        survey.pop("sufficient", None)
+        self.review = survey
         return self.sources, errors
 
     # idea generation: the same ordered stages as OR-Agent's IdeaAgent.run.
@@ -158,10 +224,15 @@ class IdeationAgent:
         # Keep COP's memory and literature context alongside OR-Agent's problem context.
         research_context = json.dumps({
             "memory": memory[:6], "review": self.review,
-            "sources": [asdict(source) for source in self.sources],
+            "sources": [{"title": source.title, "url": source.url,
+                         "kind": source.kind, "year": source.year,
+                         "content_level": source.content_level}
+                        for source in self.sources
+                        if source.content or source.content_level == "abstract"],
         }, ensure_ascii=False)
         current_research_flow_graph = json.dumps(tree.to_dict(), ensure_ascii=False)
-        allowed = {source.url for source in self.sources}
+        allowed = {source.url for source in self.sources
+                   if source.content or source.content_level == "abstract"}
 
         if not self.ideas_coordinated_generation_disabled:
             # -----Coordinated generation-----
@@ -278,7 +349,7 @@ if __name__ == "__main__":
         model = OfflineModel()
     else:
         model = LLMClient(config, temperature=1.3)
-    agent = IdeationAgent(config, model, LiteratureSearch(config.brave_key_env))
+    agent = IdeationAgent(config, model, LiteratureSearch())
     ideas = agent.run(seed_solution, [], args.num_ideas, tree,
                       "Improve the seed algorithm's measured score.")
     print("\nGenerated ideas:")

@@ -6,7 +6,7 @@ COPScientist is a research workflow for combinatorial optimization. It takes an 
 
 1. **COPScientist** loads configuration, owns the shared SQLite database, and coordinates one or more Coordinate Agents.
 2. **Coordinate Agent** starts each research round from a high-scoring tested solution, retries the root stage up to five times if no feasible child is found, expands the best unfinished leaf, retains feasible root branches even after a temporary downgrade, and requires improvement deeper in the tree. It maintains a long-term reflection across experiments.
-3. **Ideation Agent** uses the parent, research tree, and long-term reflection to propose refinements. Optional source-grounded literature and web search can be enabled later with `search.enabled: true`.
+3. **Ideation Agent** uses the parent, research tree, and long-term reflection to propose refinements. With `search.enabled: true`, it also runs a bounded web and literature survey before the existing idea-generation loop.
 4. **Coding Agent** generates code, evaluates it, and performs bounded debugging using SEARCH/REPLACE diffs or a complete corrected module.
 5. **Experiment Agent** evaluates, reflects, makes bounded local code or callback revisions, records intermediate versions, raw evaluator output and outcomes, restores the best tested version, and summarizes the experiment. It supports OR-Agent's score-dependent experiment allocation and progressive history summaries.
 6. **Evolution Agent** stores the solution lineage in SQLite. When `evolution.enabled: true`, it also distills ideation outcomes and experimentation findings into reusable memory with links to solution metrics and sources.
@@ -22,7 +22,7 @@ Python 3.11 or newer is required. From this directory:
 ```powershell
 python -m pip install -e .
 $env:OPENAI_API_KEY = "your-key"
-$env:BRAVE_SEARCH_API_KEY = "your-optional-key"
+$env:TAVILY_API_KEY = "your-optional-key"
 python -m copscientist --problem tsp --rounds 2
 ```
 
@@ -32,7 +32,7 @@ The `llm.llm_provider` setting selects `openai`, `qwen`, `deepseek`, or a custom
 
 Configuration follows three layers: the global `config.yaml` sets the default `problem`, model, search, and run budgets; each `problems/heuristics/<name>/settings.yaml` or `problems/solvers/<name>/settings.yaml` defines the problem interface and evaluation instances; command-line options such as `--problem`, `--rounds`, `--model`, and `--timeout-seconds` override them. The global file is loaded from `--config` when specified, otherwise from the current directory, otherwise from the bundled project file. `--init-config` copies the bundled file to the current directory if no config exists there. The resolved configuration is saved as `resolved_config.json` with every run.
 
-The default problem is `tsp_constructive`; install its evaluation dependencies with `python -m pip install -e '.[heuristics]'`. For `mkp_aco`, install `'.[mkp]'`. The chat endpoint is OpenAI-compatible and can be changed through `llm.base_url`, `llm.model`, and `llm.api_key_env`. Search is disabled in the base configuration. If enabled, [Brave Search](https://api-dashboard.search.brave.com/documentation/guides/authentication) is optional unless `search.required = true`; without its key, skipped web queries are recorded in `literature_review.json`. [Crossref](https://www.crossref.org/documentation/retrieve-metadata/rest-api/) supplies paper metadata.
+The default problem is `tsp_constructive`; install its evaluation dependencies with `python -m pip install -e '.[heuristics]'`. For `mkp_aco`, install `'.[mkp]'`. The chat endpoint is OpenAI-compatible and can be changed through `llm.base_url`, `llm.model`, and `llm.api_key_env`. Search is disabled in the base configuration. When enabled, web search uses `TAVILY_API_KEY` as in EvoScientist; [Crossref](https://www.crossref.org/documentation/retrieve-metadata/rest-api/) supplies paper metadata without a search key. The survey fetches up to `search.max_pages` source pages, makes up to `search.max_queries` broad and focused queries, and records unavailable pages and skipped searches in `literature_review.json`. Set `search.required: true` to stop when usable source text cannot be obtained.
 
 Available problem settings under `problems/`:
 

@@ -22,6 +22,13 @@ class Source:
     query: str
     year: int | None = None
     abstract: str = ""
+    content: str = ""
+    content_level: str = "metadata"
+
+    def __post_init__(self) -> None:
+        # Older checkpoint records predate content_level.
+        if self.content_level == "metadata" and self.abstract:
+            self.content_level = "snippet" if self.kind == "web" else "abstract"
 
 
 @dataclass

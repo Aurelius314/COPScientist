@@ -57,7 +57,8 @@ class Config:
     model_max_retries: int = 10
     base_url: str = "https://api.openai.com/v1"
     api_key_env: str = "OPENAI_API_KEY"
-    brave_key_env: str = "BRAVE_SEARCH_API_KEY"
+    search_max_queries: int = 5
+    search_max_pages: int = 6
     role_models: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     @property
@@ -200,7 +201,8 @@ def load_config(path: Path | None = None, problem_name: str | None = None,
         model_max_retries=int(llm.get("max_retries", 10)),
         base_url=str(llm.get("base_url", "https://api.openai.com/v1")),
         api_key_env=str(llm.get("api_key_env", "OPENAI_API_KEY")),
-        brave_key_env=str(search.get("brave_key_env", "BRAVE_SEARCH_API_KEY")),
+        search_max_queries=int(search.get("max_queries", 5)),
+        search_max_pages=int(search.get("max_pages", 6)),
         role_models=dict(llm.get("roles") or {}),
     )
     if config.rounds < 0 or config.debug_attempts < 0:
@@ -220,6 +222,7 @@ def load_config(path: Path | None = None, problem_name: str | None = None,
                                     config.experiment_repeats,
                                     config.evaluation_repeats,
                                     config.timeout_seconds, config.search_results,
+                                    config.search_max_queries, config.search_max_pages,
                                     config.min_experiment_repeats,
                                     config.max_experiment_repeats_cap,
                                     config.summarization_interval)):

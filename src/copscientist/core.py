@@ -30,7 +30,7 @@ class COPScientist:
                  checkpoint: str | None = None):
         self.config = config
         self.model = model
-        self.search = search or LiteratureSearch(config.brave_key_env)
+        self.search = search or LiteratureSearch()
         self.checkpoint = checkpoint
         self.tree = FlowGraph(config.task.objective)
         self.root_pool: list[str] = []

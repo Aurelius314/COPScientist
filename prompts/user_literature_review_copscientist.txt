@@ -1,3 +1,3 @@
-Review the following retrieved source records. Only cite URLs present in these records. Return the requested JSON object.
+Review the source records for this optimization task. Extract supported methods, relevant baselines, assumptions, and missing evidence. If needed, request narrow follow-up queries within the remaining search budget. Return the specified JSON object.
 
 {{context}}
